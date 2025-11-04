@@ -20,9 +20,9 @@ impl ByteStream {
     }
 
     pub fn write(&mut self, data: &str) -> usize {
-        let real_write = (self.capacity.sub(self.buffer.len())).min(data.len());
+        let real_write = (self.capacity - self.buffer.len()).min(data.len());
         self.buffer.extend(data.bytes().take(real_write));
-        self.written_bytes.checked_add(real_write).expect("written_bytes overflow!");
+        self.written_bytes += real_write;
         real_write
     }
 
@@ -37,11 +37,11 @@ impl ByteStream {
     pub fn pop_output(&mut self, len: usize) {
         if len > self.buffer.len() {
             self.set_error();
-            return ;
+            return;
         }
 
         self.buffer.drain(..len);
-        self.read_bytes.checked_add(len).expect("read_bytes overflow!");
+        self.read_bytes += len;
     }
 
     pub fn read(&mut self, len: usize) -> String {
@@ -51,7 +51,7 @@ impl ByteStream {
         }
 
         let bytes: Vec<u8> = self.buffer.drain(..len).collect();
-        self.read_bytes.checked_add(len).expect("read_bytes overflow!");
+        self.read_bytes += len;
         
         String::from_utf8_lossy(&bytes).into_owned()
     }
