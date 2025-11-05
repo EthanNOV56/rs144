@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
-name = "rs144"
+name = "apps"
+version = "0.1.0"
+dependencies = [
+ "libsponge",
+]
+
+[[package]]
+name = "libsponge"
 version = "0.1.0"

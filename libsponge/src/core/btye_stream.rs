@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, ops::Sub};
+use std::collections::VecDeque;
 
 #[derive(Default, Debug)]
 pub struct ByteStream {
@@ -52,18 +52,38 @@ impl ByteStream {
 
         let bytes: Vec<u8> = self.buffer.drain(..len).collect();
         self.read_bytes += len;
-        
+
         String::from_utf8_lossy(&bytes).into_owned()
     }
 
-    pub fn end_input(&mut self) { self.end_write = true; }
-    pub fn set_error(&mut self) { self._error = true; }
-    pub fn remaining_capacity(&self) -> usize { self.capacity.sub(self.buffer.len()) }
-    pub fn input_ended(&self) -> bool { self.end_write }
-    pub fn error(&self) -> bool { self._error }
-    pub fn buffer_size(&self) -> usize { self.buffer.len() }
-    pub fn buffer_empty(&self) -> bool { self.buffer.is_empty() }
-    pub fn eof(&self) -> bool { self.buffer_empty() && self.end_write }
-    pub fn bytes_written(&self) -> usize { self.written_bytes }
-    pub fn bytes_read(&self) -> usize { self.read_bytes }
+    pub fn end_input(&mut self) {
+        self.end_write = true;
+    }
+    pub fn set_error(&mut self) {
+        self._error = true;
+    }
+    pub fn remaining_capacity(&self) -> usize {
+        self.capacity - self.buffer.len()
+    }
+    pub fn input_ended(&self) -> bool {
+        self.end_write
+    }
+    pub fn error(&self) -> bool {
+        self._error
+    }
+    pub fn buffer_size(&self) -> usize {
+        self.buffer.len()
+    }
+    pub fn buffer_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+    pub fn eof(&self) -> bool {
+        self.buffer_empty() && self.end_write
+    }
+    pub fn bytes_written(&self) -> usize {
+        self.written_bytes
+    }
+    pub fn bytes_read(&self) -> usize {
+        self.read_bytes
+    }
 }
