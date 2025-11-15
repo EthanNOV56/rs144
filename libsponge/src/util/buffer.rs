@@ -10,7 +10,7 @@ pub enum BufferError {
     NotContiguous,
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 struct Buffer {
     storage: Vec<u8>, // TODO: Reimplement based on Arc.
     starting_offset: usize,
@@ -71,17 +71,22 @@ impl Buffer {
         self.storage.clone()
     }
 
-    pub fn try_remove_prefix(&mut self, n: &mut usize) -> Result<(), BufferError> {
+    #[inline(always)]
+    pub fn remove_prefix(&mut self, n: &mut usize) -> &[u8] {
+        self.try_remove_prefix(n)
+            .expect("This operation should not fail")
+    }
+
+    pub fn try_remove_prefix(&mut self, n: &mut usize) -> Result<&[u8], BufferError> {
         let sz = self.size();
 
         if *n > sz {
-            *n -= sz;
-            self.starting_offset = self.storage.len();
             return Err(BufferError::IndexOutOfBounds);
         }
+        let slice = &self.storage[self.starting_offset..self.starting_offset + *n];
         self.starting_offset += *n;
         *n = 0;
-        Ok(())
+        Ok(slice)
         // if (_storage and _starting_offset == _storage->size()) {
         //     _storage.reset();
         // }
@@ -93,8 +98,8 @@ impl Buffer {
     }
 }
 
-#[derive(Default, Clone)]
-struct BufferList {
+#[derive(Default, Clone, Debug)]
+pub struct BufferList {
     buffers: VecDeque<Buffer>,
 }
 
@@ -162,17 +167,17 @@ impl BufferList {
         self.iter().map(|buf| buf.len()).sum()
     }
 
-    pub fn try_remove_prefix(&mut self, mut n: usize) -> Result<(), BufferError> {
+    pub fn try_remove_prefix(&mut self, mut n: usize) -> Result<Vec<u8>, BufferError> {
+        let mut vec = Vec::with_capacity(n);
         while let Some(buffer) = self.buffers.front_mut() {
-            if n == 0 {
-                return Ok(());
-            }
-            match buffer.try_remove_prefix(&mut n) {
-                Ok(_) => return Ok(()),
-                Err(_) => {}
-            }
+            let mut sub = n.min(buffer.size());
+            n -= sub;
+            vec.extend(buffer.remove_prefix(&mut sub));
             if buffer.is_empty() {
                 self.buffers.pop_front();
+            }
+            if n == 0 {
+                return Ok(vec);
             }
         }
 
@@ -180,8 +185,8 @@ impl BufferList {
     }
 
     #[inline(always)]
-    pub fn append(&mut self, other: &BufferList) {
-        self.buffers.extend(other.buffers.clone());
+    pub fn append(&mut self, other: BufferList) {
+        self.buffers.extend(other.buffers);
     }
 
     fn iter(&self) -> impl Iterator<Item = &[u8]> {
@@ -193,6 +198,7 @@ impl BufferList {
     }
 }
 
+#[derive(Debug)]
 struct BufferViewList<'a> {
     views: VecDeque<&'a [u8]>,
 }
@@ -232,9 +238,6 @@ impl<'a> From<&'a str> for BufferViewList<'a> {
 impl<'a> BufferViewList<'a> {
     pub fn try_remove_prefix(&mut self, mut n: usize) -> Result<(), BufferError> {
         while let Some(buffer) = self.views.front_mut() {
-            if n == 0 {
-                return Ok(());
-            }
             let sz = buffer.len();
             let mut drop = false;
             match sz.cmp(&n) {
@@ -253,6 +256,9 @@ impl<'a> BufferViewList<'a> {
             }
             if drop {
                 self.views.pop_front();
+            }
+            if n == 0 {
+                return Ok(());
             }
         }
         Err(BufferError::IndexOutOfBounds)
