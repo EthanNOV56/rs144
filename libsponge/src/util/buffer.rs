@@ -11,7 +11,7 @@ pub enum BufferError {
 }
 
 #[derive(Default, Clone, Debug)]
-struct Buffer {
+pub struct Buffer {
     storage: Vec<u8>, // TODO: Reimplement based on Arc.
     starting_offset: usize,
 }
