@@ -88,7 +88,7 @@ impl StreamReassembler {
     }
 
     fn try_get_next_merge(&self, new_node: &BlockNode) -> Option<usize> {
-        if let Some((idx, node)) = self.pending_blocks.range(new_node.begin..).next() {
+        for (idx, node) in self.pending_blocks.range(new_node.begin..) {
             if new_node.can_merge(node) {
                 return Some(*idx);
             }
@@ -97,7 +97,7 @@ impl StreamReassembler {
     }
 
     fn try_get_prev_merge(&self, new_node: &BlockNode) -> Option<usize> {
-        if let Some((idx, node)) = self.pending_blocks.range(..new_node.begin).next_back() {
+        for (idx, node) in self.pending_blocks.range(..=new_node.begin).rev() {
             if new_node.can_merge(node) {
                 return Some(*idx);
             }
