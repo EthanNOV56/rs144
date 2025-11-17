@@ -18,10 +18,9 @@ impl ByteStream {
         }
     }
 
-    pub fn read(&mut self, len: usize) -> Result<Vec<u8>, BufferError> {
-        let vec = self.peek_out(len);
-        self.pop_output(len)?;
-        Ok(vec)
+    #[inline(always)]
+    pub fn read(&mut self, len: usize) -> Vec<u8> {
+        self.pop_output(len)
     }
 
     pub fn write(&mut self, data: &[u8]) -> usize {
@@ -37,10 +36,10 @@ impl ByteStream {
         vec[..length].to_vec()
     }
 
-    pub fn pop_output(&mut self, len: usize) -> Result<Vec<u8>, BufferError> {
+    pub fn pop_output(&mut self, len: usize) -> Vec<u8> {
         let length = len.min(self.buffer.size());
         self.bytes_read += length;
-        self.buffer.try_remove_prefix(length)
+        self.buffer.remove_prefix(length)
     }
 
     #[inline(always)]

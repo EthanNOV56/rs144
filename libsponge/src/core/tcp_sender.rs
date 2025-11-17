@@ -1,11 +1,11 @@
-use crate::{BufferError, ByteStream, Milliseconds, TCPConfig, TCPSegment, WrappingU32};
+use crate::{ByteStream, Milliseconds, TCPConfig, TCPSegment, WrappingU32};
 
 use std::collections::VecDeque;
 
 #[derive(Debug, Default)]
 pub struct TCPSender {
     isn: WrappingU32,
-    segments_out: VecDeque<TCPSegment>,
+    pub segments_out: VecDeque<TCPSegment>,
     initial_retx_timeout: Milliseconds,
     stream_in: ByteStream,
     next_seqno: u64,
@@ -54,15 +54,11 @@ impl TCPSender {
         &mut self.stream_in
     }
 
-    pub fn ack_received(
-        &mut self,
-        ackno: WrappingU32,
-        window_size: u16,
-    ) -> Result<bool, BufferError> {
+    pub fn ack_received(&mut self, ackno: WrappingU32, window_size: u16) -> bool {
         let abs_ackno = WrappingU32::unwrap(&ackno, &self.isn, self.recv_ackno as _);
         // out of window, invalid ackno
         if abs_ackno > self.next_seqno {
-            return Ok(false);
+            return false;
         }
 
         // if ackno is legal, modify _window_size before return
@@ -70,7 +66,7 @@ impl TCPSender {
 
         // ack has been received
         if abs_ackno as usize <= self.recv_ackno {
-            return Ok(true);
+            return true;
         }
         self.recv_ackno = abs_ackno as _;
 
@@ -87,7 +83,7 @@ impl TCPSender {
             }
         }
 
-        self.try_fill_window(None)?;
+        self.fill_window(None);
 
         self.retx_timeout = self.initial_retx_timeout;
         self.consq_retxs = 0;
@@ -97,7 +93,7 @@ impl TCPSender {
             self.timer_running = true;
             self.timer = 0.into();
         }
-        return Ok(true);
+        return true;
     }
 
     pub fn send_empty_segment(&mut self, seqno: Option<WrappingU32>) {
@@ -106,7 +102,7 @@ impl TCPSender {
         self.segments_out_mut().push_back(seg);
     }
 
-    pub fn try_fill_window(&mut self, send_syn: Option<bool>) -> Result<(), BufferError> {
+    pub fn fill_window(&mut self, send_syn: Option<bool>) {
         // sent a SYN before sent other segment
         let send_syn = send_syn.unwrap_or(true);
         if !self.syn_flag {
@@ -116,7 +112,7 @@ impl TCPSender {
                 self.send_segment(seg);
                 self.syn_flag = true;
             }
-            return Ok(());
+            return;
         }
 
         // take window_size as 1 when it equal 0
@@ -129,18 +125,17 @@ impl TCPSender {
                 break;
             }
             let mut seg = TCPSegment::default();
-            *seg.payload_mut() = self.stream_in_mut().read(remain)?.into();
+            *seg.payload_mut() = self.stream_in_mut().read(remain).into();
             if seg.length_in_sequence_space() < win as _ && self.stream_in.eof() {
                 seg.header_mut().fin = true;
                 self.fin_flag = true;
             }
             // stream is empty
             if seg.length_in_sequence_space() == 0 {
-                return Ok(());
+                return;
             }
             self.send_segment(seg);
         }
-        Ok(())
     }
 
     pub fn tick(&mut self, ms_since_last_tick: Milliseconds) {

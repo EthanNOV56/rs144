@@ -12,3 +12,6 @@ pub use tcp_sender::TCPSender;
 
 pub mod wrapping_integers;
 pub use wrapping_integers::WrappingU32;
+
+pub mod tcp_connection;
+pub use tcp_connection::TCPConnection;

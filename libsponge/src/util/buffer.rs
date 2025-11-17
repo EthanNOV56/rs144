@@ -213,6 +213,22 @@ impl BufferList {
         Err(BufferError::IndexOutOfBounds)
     }
 
+    pub fn remove_prefix(&mut self, mut n: usize) -> Vec<u8> {
+        let mut vec = Vec::with_capacity(n);
+        while let Some(buffer) = self.buffers.front_mut() {
+            let mut sub = n.min(buffer.size());
+            n -= sub;
+            vec.extend(buffer.remove_prefix(&mut sub));
+            if buffer.is_empty() {
+                self.buffers.pop_front();
+            }
+            if n == 0 {
+                return vec;
+            }
+        }
+        panic!("This method should not fail.")
+    }
+
     #[inline(always)]
     pub fn append(&mut self, other: BufferList) {
         self.buffers.extend(other.buffers);

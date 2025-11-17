@@ -9,3 +9,6 @@ pub use tcp_segment::*;
 
 pub mod tcp_header;
 pub use tcp_header::*;
+
+pub mod tcp_state;
+pub use tcp_state::*;
