@@ -1,5 +1,6 @@
 use crate::WrappingU32;
 
+#[derive(Debug, Clone)]
 pub struct TCPConfig {
     pub capacity: usize,
     pub max_payload_size: usize,
