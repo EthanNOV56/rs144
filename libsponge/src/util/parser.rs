@@ -104,8 +104,12 @@ impl NetParser {
         }
     }
 
-    pub fn buffer(&self) -> &Buffer {
+    pub fn get_buffer(&self) -> &Buffer {
         &self.buffer
+    }
+
+    pub fn get_buffer_mut(&mut self) -> &mut Buffer {
+        &mut self.buffer
     }
 
     pub fn get_result(&self) -> Result<(), ParseError> {

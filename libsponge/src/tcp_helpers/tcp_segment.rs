@@ -1,30 +1,56 @@
+use crate::{Buffer, BufferList, InternetChecksum, NetParser, ParseError, TCPHeader};
+
 #[derive(Debug, Default)]
-pub struct TCPSegment;
+pub struct TCPSegment {
+    header: TCPHeader,
+    payload: Buffer,
+}
 
-// class TCPSegment {
-//   private:
-//     TCPHeader _header{};
-//     Buffer _payload{};
+impl TCPSegment {
+    pub fn parse(
+        &mut self,
+        buffer: Buffer,
+        datagram_layer_checksum: u32,
+    ) -> Result<(), ParseError> {
+        let mut checksum = InternetChecksum::new(datagram_layer_checksum);
+        checksum.add(buffer.as_ref());
+        if checksum.value() != 0 {
+            return Err(ParseError::BadChecksum);
+        }
 
-//   public:
-//     //! \brief Parse the segment from a string
-//     ParseResult parse(const Buffer buffer, const uint32_t datagram_layer_checksum = 0);
+        let mut p = NetParser::new(buffer);
+        self.header.parse(&mut p);
+        self.payload = p.get_buffer_mut().take();
+        p.get_result()
+    }
 
-//     //! \brief Serialize the segment to a string
-//     BufferList serialize(const uint32_t datagram_layer_checksum = 0) const;
+    pub fn serialize(&mut self, datagram_layer_checksum: u32) -> Result<BufferList, ParseError> {
+        let mut header_out = self.header.clone();
+        let mut check_sum = InternetChecksum::new(datagram_layer_checksum);
+        let hr_ser = header_out.serialize()?;
+        check_sum.add(&hr_ser);
+        check_sum.add(&self.payload.as_ref());
+        header_out.check_sum = check_sum.value();
+        Ok(vec![hr_ser.into(), self.payload_mut().take()].into())
+    }
 
-//     //! \name Accessors
-//     //!@{
-//     const TCPHeader &header() const { return _header; }
-//     TCPHeader &header() { return _header; }
+    pub fn header(&self) -> &TCPHeader {
+        &self.header
+    }
 
-//     const Buffer &payload() const { return _payload; }
-//     Buffer &payload() { return _payload; }
-//     //!@}
+    pub fn header_mut(&mut self) -> &mut TCPHeader {
+        &mut self.header
+    }
 
-//     //! \brief Segment's length in sequence space
-//     //! \note Equal to payload length plus one byte if SYN is set, plus one byte if FIN is set
-//     size_t length_in_sequence_space() const;
-// };
+    pub fn payload(&self) -> &Buffer {
+        &self.payload
+    }
 
-// #endif  // SPONGE_LIBSPONGE_TCP_SEGMENT_HH
+    pub fn payload_mut(&mut self) -> &mut Buffer {
+        &mut self.payload
+    }
+
+    pub fn length_in_sequence_space(&self) -> usize {
+        self.payload.size() + (self.header.syn as usize) + (self.header.fin as usize)
+    }
+}

@@ -2,7 +2,7 @@ use rand::random;
 
 use std::{fmt::Display, ops::Sub};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct WrappingU32 {
     raw_val: u32,
 }

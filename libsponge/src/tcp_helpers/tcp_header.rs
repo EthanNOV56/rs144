@@ -5,20 +5,21 @@ use crate::{
     util::parser::{NetParser, NetUnparser, ParseError},
 };
 
+#[derive(Clone)]
 pub struct TCPHeader {
     src_port: u16,
     dst_port: u16,
-    seq_no: WrappingU32,
+    pub seq_no: WrappingU32,
     ack_no: WrappingU32,
     data_offset: u8,
     urg: bool,
     ack: bool,
     psh: bool,
     rst: bool,
-    syn: bool,
-    fin: bool,
+    pub syn: bool,
+    pub fin: bool,
     win: u16,
-    check_sum: u16,
+    pub check_sum: u16,
     urg_ptr: u16,
 }
 
@@ -46,7 +47,7 @@ impl Default for TCPHeader {
 impl TCPHeader {
     pub const LENGTH: usize = 20;
 
-    pub fn parse(&mut self, mut p: NetParser) -> Result<(), ParseError> {
+    pub fn parse(&mut self, p: &mut NetParser) -> Result<(), ParseError> {
         self.src_port = p.parse_u16(); // source port
         self.dst_port = p.parse_u16(); // destination port
         self.seq_no = WrappingU32::new(p.parse_u32()); // sequence number

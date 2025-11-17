@@ -4,6 +4,9 @@ pub use btye_stream::ByteStream;
 pub mod stream_reassembler;
 pub use stream_reassembler::StreamReassembler;
 
+pub mod tcp_receiver;
+pub use tcp_receiver::TCPReceiver;
+
 pub mod tcp_sender;
 pub use tcp_sender::TCPSender;
 

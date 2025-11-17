@@ -1,21 +1,6 @@
-use crate::{ByteStream, TCPConfig, TCPSegment, WrappingU32};
+use crate::{ByteStream, TCPConfig, TCPSegment, WrappingU32, Milliseconds};
 
 use std::collections::VecDeque;
-
-#[derive(Debug, Default, Copy, Clone)]
-struct Milliseconds(u64);
-
-impl From<u64> for Milliseconds {
-    fn from(millis: u64) -> Self {
-        Milliseconds(millis)
-    }
-}
-
-impl Into<u64> for Milliseconds {
-    fn into(self) -> u64 {
-        self.0
-    }
-}
 
 #[derive(Debug, Default)]
 pub struct TCPSender {
@@ -37,7 +22,7 @@ pub struct TCPSender {
 }
 
 impl TCPSender {
-    fn send_segment(&self, segment: TCPSegment) {}
+    fn send_segment(&self, : TCPSegment) {}
 
     pub fn new(cfg: TCPConfig) -> Self {
         let isn = cfg.fixed_isn.unwrap_or_else(|| WrappingU32::random());
@@ -51,11 +36,11 @@ impl TCPSender {
         }
     }
 
-    pub fn stream_in(&self) -> &ByteStream {
+    pub fn get_stream_in(&self) -> &ByteStream {
         &self.stream_in
     }
 
-    pub fn stream_in_mut(&mut self) -> &mut ByteStream {
+    pub fn get_stream_in_mut(&mut self) -> &mut ByteStream {
         &mut self.stream_in
     }
 

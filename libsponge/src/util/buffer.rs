@@ -8,6 +8,8 @@ pub enum BufferError {
     IndexOutOfBounds,
     #[error("Buffer is not contiguous, use BufferList::into<String>() instead.")]
     NotContiguous,
+    #[error("Buffer is uninitialized.")]
+    BufferUninitialized,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -96,6 +98,11 @@ impl Buffer {
     pub fn is_empty(&self) -> bool {
         self.size() == 0
     }
+
+    #[inline(always)]
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::default())
+    }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -112,11 +119,33 @@ impl From<Buffer> for BufferList {
     }
 }
 
+impl From<Vec<Buffer>> for BufferList {
+    #[inline(always)]
+    fn from(buffers: Vec<Buffer>) -> Self {
+        BufferList {
+            buffers: VecDeque::from(buffers),
+        }
+    }
+}
+
 impl From<Vec<u8>> for BufferList {
     #[inline(always)]
     fn from(v: Vec<u8>) -> Self {
         BufferList {
             buffers: VecDeque::from([Buffer::from(v)]),
+        }
+    }
+}
+
+impl From<Vec<Vec<u8>>> for BufferList {
+    #[inline(always)]
+    fn from(v: Vec<Vec<u8>>) -> Self {
+        BufferList {
+            buffers: VecDeque::from(
+                v.into_iter()
+                    .map(Buffer::from)
+                    .collect::<VecDeque<Buffer>>(),
+            ),
         }
     }
 }
