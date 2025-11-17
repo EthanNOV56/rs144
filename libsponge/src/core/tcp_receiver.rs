@@ -1,4 +1,4 @@
-use crate::{ByteStream, StreamReassembler, TCPSegment, WrappingU32};
+use crate::{ByteStream, StreamReassembler, TCPConfig, TCPSegment, WrappingU32};
 
 pub struct TCPReceiver {
     reassembler: StreamReassembler,
@@ -18,6 +18,18 @@ impl TCPReceiver {
             base: 0,
             isn: 0,
             capacity,
+        }
+    }
+
+    pub fn with_config(cfg: &TCPConfig) -> Self {
+        let capa = cfg.recv_capacity;
+        TCPReceiver {
+            reassembler: StreamReassembler::new(capa),
+            syn_flag: false,
+            fin_flag: false,
+            base: 0,
+            isn: 0,
+            capacity: capa,
         }
     }
 
@@ -46,7 +58,7 @@ impl TCPReceiver {
     pub fn segment_received(&mut self, seg: &TCPSegment) -> bool {
         let mut ret = false;
         let mut abs_seq_no: usize = 0;
-        let mut length;
+        let length;
 
         if seg.header().syn {
             if self.syn_flag {

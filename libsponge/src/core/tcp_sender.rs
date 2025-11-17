@@ -34,14 +34,17 @@ impl TCPSender {
         }
     }
 
-    pub fn new(cfg: TCPConfig) -> Self {
-        let isn = cfg.fixed_isn.unwrap_or_else(|| WrappingU32::random());
+    pub fn with_config(cfg: &TCPConfig) -> Self {
+        let isn = cfg
+            .fixed_isn
+            .clone()
+            .unwrap_or_else(|| WrappingU32::random());
         let timeout = (cfg.timeout_default as u64).into();
         Self {
             isn,
             initial_retx_timeout: timeout,
             retx_timeout: timeout,
-            stream_in: ByteStream::new(cfg.capacity),
+            stream_in: ByteStream::new(cfg.send_capacity),
             ..Default::default()
         }
     }
@@ -54,8 +57,8 @@ impl TCPSender {
         &mut self.stream_in
     }
 
-    pub fn ack_received(&mut self, ackno: WrappingU32, window_size: u16) -> bool {
-        let abs_ackno = WrappingU32::unwrap(&ackno, &self.isn, self.recv_ackno as _);
+    pub fn ack_received(&mut self, ackno: &WrappingU32, window_size: u16) -> bool {
+        let abs_ackno = WrappingU32::unwrap(ackno, &self.isn, self.recv_ackno as _);
         // out of window, invalid ackno
         if abs_ackno > self.next_seqno {
             return false;
@@ -160,6 +163,10 @@ impl TCPSender {
 
     pub fn consq_retxs(&self) -> usize {
         self.consq_retxs
+    }
+
+    pub fn segments_out(&self) -> &VecDeque<TCPSegment> {
+        &self.segments_out
     }
 
     pub fn segments_out_mut(&mut self) -> &mut VecDeque<TCPSegment> {
