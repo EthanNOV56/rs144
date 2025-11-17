@@ -1,6 +1,6 @@
 use crate::{Buffer, BufferList, InternetChecksum, NetParser, ParseError, TCPHeader};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct TCPSegment {
     header: TCPHeader,
     payload: Buffer,

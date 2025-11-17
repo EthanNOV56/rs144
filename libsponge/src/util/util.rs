@@ -1,6 +1,8 @@
 use std::error::Error;
 use std::fmt;
 use std::io;
+use std::ops::AddAssign;
+use std::ops::MulAssign;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
@@ -46,7 +48,7 @@ where
     }
 }
 
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Milliseconds(u64);
 
 impl From<u64> for Milliseconds {
@@ -58,6 +60,18 @@ impl From<u64> for Milliseconds {
 impl Into<u64> for Milliseconds {
     fn into(self) -> u64 {
         self.0
+    }
+}
+
+impl AddAssign for Milliseconds {
+    fn add_assign(&mut self, other: Self) {
+        self.0 += other.0;
+    }
+}
+
+impl MulAssign<u64> for Milliseconds {
+    fn mul_assign(&mut self, other: u64) {
+        self.0 *= other;
     }
 }
 

@@ -42,10 +42,12 @@ impl TCPReceiver {
         self.reassembler.unassemble_bytes()
     }
 
+    // TODO: Refactor this function to improve readability and maintainability
     pub fn segment_received(&mut self, seg: &TCPSegment) -> bool {
         let mut ret = false;
         let mut abs_seq_no: usize = 0;
         let mut length;
+
         if seg.header().syn {
             if self.syn_flag {
                 return false;
