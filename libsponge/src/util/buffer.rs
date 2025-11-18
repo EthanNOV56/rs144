@@ -241,6 +241,11 @@ impl BufferList {
     fn iter_mut(&mut self) -> impl Iterator<Item = &mut [u8]> {
         self.buffers.iter_mut().map(|buf| buf.as_mut())
     }
+
+    #[inline(always)]
+    pub fn take(&mut self) -> Self {
+        std::mem::replace(self, Self::default())
+    }
 }
 
 #[derive(Debug)]

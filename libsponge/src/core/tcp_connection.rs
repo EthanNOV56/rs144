@@ -216,7 +216,6 @@ impl TCPConnection {
         }
 
         self.linger_mut();
-
         self.active_mut();
     }
 

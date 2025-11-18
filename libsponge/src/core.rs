@@ -15,3 +15,6 @@ pub use wrapping_integers::WrappingU32;
 
 pub mod tcp_connection;
 pub use tcp_connection::TCPConnection;
+
+pub mod network_interface;
+pub use network_interface::*;

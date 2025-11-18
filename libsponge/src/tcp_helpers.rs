@@ -12,3 +12,9 @@ pub use tcp_header::*;
 
 pub mod tcp_state;
 pub use tcp_state::*;
+
+pub mod ethernet_frame;
+pub use ethernet_frame::*;
+
+pub mod ethernet_header;
+pub use ethernet_header::*;
