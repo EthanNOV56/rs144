@@ -61,6 +61,23 @@ impl TCPConnection {
             && self.sender.next_seqno_abs() as usize == self.sender.stream_in().bytes_written() + 2
             && self.sender.bytes_in_flight() == 0
     }
+
+    fn linger_mut(&mut self) -> bool {
+        if self.inbound_ended() && !self.sender.stream_in().eof() {
+            self.linger = false;
+        }
+        self.linger
+    }
+
+    fn active_mut(&mut self) -> bool {
+        if self.inbound_ended() && self.outbound_ended() {
+            let cfg_to: Milliseconds = (self.cfg.rt_timeout as u64).into();
+            if !self.linger || self.ms_since_last_seg_recv >= cfg_to * 10 {
+                self.active = false;
+            }
+        }
+        self.active
+    }
 }
 
 impl TCPConnection {
@@ -124,6 +141,8 @@ impl TCPConnection {
     }
 
     pub fn renew_state(&mut self) -> &Result<TCPState> {
+        self.active_mut();
+        self.linger_mut();
         self.state = match (self.sender.renew_state(), self.receiver.renew_state()) {
             (Err(_), Err(_)) if !self.linger && !self.active => Ok(TCPState::Reset),
             (Ok(SenderState::Closed), Ok(ReceiverState::Listen)) => Ok(TCPState::Listen),
@@ -160,10 +179,7 @@ impl TCPConnection {
 
         self.receiver.segment_received(seg);
 
-        // multi used
-        if self.inbound_ended() && !self.sender.stream_in().eof() {
-            self.linger = false;
-        }
+        self.linger_mut();
 
         if seg.header().ack {
             self.sender
@@ -199,16 +215,9 @@ impl TCPConnection {
             self.segments_out_mut().push_back(retx_seg);
         }
 
-        if self.inbound_ended() && !self.sender.stream_in().eof() {
-            self.linger = false;
-        }
+        self.linger_mut();
 
-        if self.inbound_ended() && self.outbound_ended() {
-            let cfg_to: Milliseconds = (self.cfg.rt_timeout as u64).into();
-            if !self.linger || self.ms_since_last_seg_recv >= cfg_to * 10 {
-                self.active = false;
-            }
-        }
+        self.active_mut();
     }
 
     pub fn segments_out_mut(&mut self) -> &mut VecDeque<TCPSegment> {
