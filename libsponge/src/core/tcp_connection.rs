@@ -123,7 +123,6 @@ impl TCPConnection {
         self.ms_since_last_seg_recv
     }
 
-    #[inline(always)]
     pub fn renew_state(&mut self) -> &Result<TCPState> {
         self.state = match (self.sender.renew_state(), self.receiver.renew_state()) {
             (Err(_), Err(_)) if !self.linger && !self.active => Ok(TCPState::Reset),
@@ -150,7 +149,6 @@ impl TCPConnection {
         };
         &self.state
     }
-    // TCPState state() const { return {_sender, _receiver, active(), _linger_after_streams_finish}; };
 
     // TODO: rewrite this function based on PSM?
     pub fn segment_received(&mut self, seg: &TCPSegment) {

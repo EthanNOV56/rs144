@@ -44,20 +44,3 @@ pub enum ReceiverState {
     SynRcvd,
     FinRcvd,
 }
-
-// trait State {}
-// impl State for TCPState {}
-// impl State for SenderState {}
-// impl State for ReceiverState {}
-
-// impl<S> PartialEq<S> for Result<S>
-// where
-//     S: State + PartialEq,
-// {
-//     fn eq(&self, other: &Result<S>) -> bool {
-//         match (self, other) {
-//             (Ok(i), Ok(j)) => i == j,
-//             _ => false,
-//         }
-//     }
-// }
