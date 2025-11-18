@@ -2,7 +2,9 @@ use std::error::Error;
 use std::fmt;
 use std::io;
 use std::ops::AddAssign;
+use std::ops::Mul;
 use std::ops::MulAssign;
+use std::ops::ShlAssign;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug)]
@@ -72,6 +74,20 @@ impl AddAssign for Milliseconds {
 impl MulAssign<u64> for Milliseconds {
     fn mul_assign(&mut self, other: u64) {
         self.0 *= other;
+    }
+}
+
+impl ShlAssign<u64> for Milliseconds {
+    fn shl_assign(&mut self, other: u64) {
+        self.0 <<= other;
+    }
+}
+
+impl Mul<u64> for Milliseconds {
+    type Output = Self;
+
+    fn mul(self, other: u64) -> Self {
+        Self(self.0 * other)
     }
 }
 

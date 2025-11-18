@@ -2,13 +2,11 @@ use crate::{
     ByteStream, Milliseconds, TCPConfig, TCPReceiver, TCPSegment, TCPSender, tcp_state::*,
 };
 
-use std::{collections::VecDeque, marker::PhantomData};
+use anyhow::{Error, Result};
 
-pub struct TCPConnection<T: TCPState, S: SenderState, R: ReceiverState> {
-    _tcp_state: PhantomData<T>,
-    _sender_state: PhantomData<S>,
-    _receiver_state: PhantomData<R>,
+use std::collections::VecDeque;
 
+pub struct TCPConnection {
     cfg: TCPConfig, //TODO maybe not need to be carried around...
     sender: TCPSender,
     receiver: TCPReceiver,
@@ -16,78 +14,56 @@ pub struct TCPConnection<T: TCPState, S: SenderState, R: ReceiverState> {
     linger: bool,
     ms_since_last_seg_recv: Milliseconds,
     active: bool,
-    need_send_rst: bool,
-    ack_for_fin_sent: bool,
+    state: Result<TCPState>,
 }
 
-impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> {
-    fn push_segments_out(&mut self, send_syn: Option<bool>) -> bool {
-        let send_syn = send_syn.unwrap_or(false);
-        let in_syn_recv = self.in_syn_recv();
-        self.sender.fill_window(Some(send_syn || in_syn_recv));
-        while let Some(mut seg) = self.sender.segments_out.pop_front() {
-            if let Some(val) = self.receiver.ackno() {
-                seg.header_mut().ack = true;
-                seg.header_mut().ack_no = val;
-                seg.header_mut().win = self.receiver.win_size() as u16;
-            }
-            if self.need_send_rst {
-                self.need_send_rst = false;
-                seg.header_mut().rst = true;
-            }
-            self.segments_out.push_back(seg);
-        }
-        self.clean_shutdown();
-        return true;
-    }
-
-    fn clean_shutdown(&mut self) -> bool {
-        if self.receiver.stream_out().input_ended() && !self.sender.stream_in().eof() {
-            self.linger = false;
-        }
-
-        if self.sender.stream_in().eof()
-            && self.sender.bytes_in_flight() == 0
-            && self.receiver.stream_out().input_ended()
-        {
-            let ms: u64 = self.ms_since_last_seg_recv.into();
-            if !self.linger || ms >= 10 * self.cfg.rt_timeout as u64 {
-                self.active = false;
-            }
-        }
-        return !self.active;
-    }
-
-    fn unclean_shutdown(&mut self, send_rst: bool) {
-        self.receiver.stream_out_mut().set_error();
-        self.sender.stream_in_mut().set_error();
+impl TCPConnection {
+    fn set_rst(&mut self) {
+        self.sender
+            .set_state(Err(Error::from(TCPConnectionError::SenderError)));
+        self.receiver
+            .set_state(Err(Error::from(TCPConnectionError::ReceiverError)));
         self.active = false;
-        if send_rst {
-            self.need_send_rst = true;
-            if self.sender.segments_out_mut().is_empty() {
-                self.sender.send_empty_segment(None);
-            }
-            self.push_segments_out(None);
+    }
+
+    fn send_rst(&mut self) {
+        self.sender.send_empty_segment();
+        let mut rst_seg = self.sender.segments_out_mut().pop_front().unwrap();
+        self.set_ack_and_winsize(&mut rst_seg);
+        rst_seg.header_mut().rst = true;
+        self.segments_out.push_back(rst_seg);
+    }
+
+    fn real_send(&mut self) -> bool {
+        let mut sent = false;
+        while let Some(mut seg) = self.sender.segments_out_mut().pop_front() {
+            self.set_ack_and_winsize(&mut seg);
+            self.segments_out.push_back(seg);
+            sent = true;
         }
+        sent
     }
 
-    fn in_listen(&self) -> bool {
-        self.receiver.ackno().is_none() && self.sender.next_seqno_abs() == 0
+    fn set_ack_and_winsize(&self, seg: &mut TCPSegment) {
+        if let Some(ackno) = self.receiver.ackno() {
+            seg.header_mut().ack = true;
+            seg.header_mut().ack_no = ackno;
+        }
+        seg.header_mut().win = self.receiver.win_size() as _;
     }
 
-    fn in_syn_recv(&mut self) -> bool {
-        let res = self.receiver.ackno().is_some() && !self.receiver.stream_out().input_ended();
-        if res {}
-        res
+    fn inbound_ended(&self) -> bool {
+        self.receiver.unassembled_bytes() == 0 && self.receiver.stream_out().input_ended()
     }
 
-    fn in_syn_sent(&self) -> bool {
-        self.sender.next_seqno_abs() > 0
-            && self.sender.bytes_in_flight() == self.sender.next_seqno_abs() as _
+    fn outbound_ended(&self) -> bool {
+        self.sender.stream_in().eof()
+            && self.sender.next_seqno_abs() as usize == self.sender.stream_in().bytes_written() + 2
+            && self.sender.bytes_in_flight() == 0
     }
 }
 
-impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> {
+impl TCPConnection {
     pub fn with_config(cfg: &TCPConfig) -> Self {
         Self {
             active: true,
@@ -97,22 +73,22 @@ impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> {
             segments_out: VecDeque::new(),
             cfg: cfg.clone(),
             linger: true,
-            need_send_rst: false,
-            ack_for_fin_sent: false,
-
-            _tcp_state: PhantomData,
-            _receiver_state: PhantomData,
-            _sender_state: PhantomData,
+            state: Ok(TCPState::default()),
         }
     }
 
     pub fn connect(&mut self) {
-        self.push_segments_out(Some(true));
+        self.sender.fill_window();
+        self.real_send();
     }
 
     pub fn write(&mut self, data: &[u8]) -> usize {
+        if data.len() == 0 {
+            return 0;
+        }
         let ret = self.sender.stream_in_mut().write(data);
-        self.push_segments_out(None);
+        self.sender.fill_window();
+        self.real_send();
         ret
     }
 
@@ -123,7 +99,8 @@ impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> {
 
     pub fn end_input_stream(&mut self) {
         self.sender.stream_in_mut().end_input();
-        self.push_segments_out(None);
+        self.sender.fill_window();
+        self.real_send();
     }
 
     #[inline(always)]
@@ -145,55 +122,66 @@ impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> {
     pub fn ms_since_last_seg_recv(&self) -> Milliseconds {
         self.ms_since_last_seg_recv
     }
+
+    #[inline(always)]
+    pub fn renew_state(&mut self) -> &Result<TCPState> {
+        self.state = match (self.sender.renew_state(), self.receiver.renew_state()) {
+            (Err(_), Err(_)) if !self.linger && !self.active => Ok(TCPState::Reset),
+            (Ok(SenderState::Closed), Ok(ReceiverState::Listen)) => Ok(TCPState::Listen),
+            (Ok(SenderState::SynSent), Ok(ReceiverState::Listen)) => Ok(TCPState::SynSent),
+            (Ok(SenderState::SynSent), Ok(ReceiverState::SynRcvd)) => Ok(TCPState::SynRcvd),
+            (Ok(SenderState::SynAcked), Ok(ReceiverState::SynRcvd)) => Ok(TCPState::Established),
+            (Ok(SenderState::SynAcked), Ok(ReceiverState::FinRcvd)) if !self.linger => {
+                Ok(TCPState::CloseWait)
+            }
+            (Ok(SenderState::FinSent), Ok(ReceiverState::FinRcvd)) if !self.linger => {
+                Ok(TCPState::LastAck)
+            }
+            (Ok(SenderState::FinSent), Ok(ReceiverState::FinRcvd)) => Ok(TCPState::Closing),
+            (Ok(SenderState::FinAcked), Ok(ReceiverState::FinRcvd))
+                if !self.linger && !self.active =>
+            {
+                Ok(TCPState::Closed)
+            }
+            (Ok(SenderState::FinSent), Ok(ReceiverState::SynRcvd)) => Ok(TCPState::FinWait1),
+            (Ok(SenderState::FinAcked), Ok(ReceiverState::SynRcvd)) => Ok(TCPState::FinWait2),
+            (Ok(SenderState::FinAcked), Ok(ReceiverState::FinRcvd)) => Ok(TCPState::TimeWait),
+            _ => Err(Error::from(TCPConnectionError::UnknownConnectionState)),
+        };
+        &self.state
+    }
     // TCPState state() const { return {_sender, _receiver, active(), _linger_after_streams_finish}; };
 
-    // TODO: rewrite this function based on PSM.
+    // TODO: rewrite this function based on PSM?
     pub fn segment_received(&mut self, seg: &TCPSegment) {
-        if !self.active {
-            return;
-        }
-
         self.ms_since_last_seg_recv = 0.into();
-
-        if self.in_syn_sent() && seg.header().ack && !seg.payload().is_empty() {
-            return;
-        }
-
-        let mut send_empty = false;
-        if self.sender.next_seqno_abs() > 0
-            && seg.header().ack
-            && !self
-                .sender
-                .ack_received(&seg.header().ack_no, seg.header().win)
-        {
-            send_empty = true;
-        }
-
-        if !self.receiver.segment_received(seg) {
-            send_empty = true;
-        }
-
-        if seg.header().syn && self.sender.next_seqno_abs() == 0 {
-            self.connect();
-        }
-
         if seg.header().rst {
-            if self.in_syn_sent() && !seg.header().ack {
-                return;
-            }
-            self.unclean_shutdown(false);
+            self.set_rst();
             return;
+        }
+
+        self.receiver.segment_received(seg);
+
+        // multi used
+        if self.inbound_ended() && !self.sender.stream_in().eof() {
+            self.linger = false;
+        }
+
+        if seg.header().ack {
+            self.sender
+                .ack_received(&seg.header().ack_no, seg.header().win);
+            self.real_send();
         }
 
         if seg.length_in_sequence_space() > 0 {
-            send_empty = true;
+            self.sender.fill_window();
+            if !self.real_send() {
+                self.sender.send_empty_segment();
+                let mut ack_seg = self.sender.segments_out_mut().pop_front().unwrap();
+                self.set_ack_and_winsize(&mut ack_seg);
+                self.segments_out.push_back(ack_seg);
+            }
         }
-
-        if send_empty && self.receiver.ackno().is_some() && self.sender.segments_out().is_empty() {
-            self.sender.send_empty_segment(None);
-        }
-
-        self.push_segments_out(None);
     }
 
     pub fn tick(&mut self, ms_since_last_tick: Milliseconds) {
@@ -204,10 +192,25 @@ impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> {
         self.ms_since_last_seg_recv += ms_since_last_tick;
         self.sender.tick(ms_since_last_tick);
 
-        if self.sender.consq_retxs() > TCPConfig::MAX_RETX_ATTEMPTS as usize {
-            self.unclean_shutdown(true);
+        if let Some(mut retx_seg) = self.sender.segments_out_mut().pop_front() {
+            self.set_ack_and_winsize(&mut retx_seg);
+            if self.sender.consq_retxs() > self.cfg.max_retx_attempts as _ {
+                self.set_rst();
+                retx_seg.header_mut().rst = true;
+            }
+            self.segments_out_mut().push_back(retx_seg);
         }
-        self.push_segments_out(None);
+
+        if self.inbound_ended() && !self.sender.stream_in().eof() {
+            self.linger = false;
+        }
+
+        if self.inbound_ended() && self.outbound_ended() {
+            let cfg_to: Milliseconds = (self.cfg.rt_timeout as u64).into();
+            if !self.linger || self.ms_since_last_seg_recv >= cfg_to * 10 {
+                self.active = false;
+            }
+        }
     }
 
     pub fn segments_out_mut(&mut self) -> &mut VecDeque<TCPSegment> {
@@ -220,23 +223,11 @@ impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> {
     }
 }
 
-impl<T: TCPState, S: SenderState, R: ReceiverState> Drop for TCPConnection<T, S, R> {
+impl Drop for TCPConnection {
     fn drop(&mut self) {
         if self.active {
-            self.unclean_shutdown(true);
+            self.set_rst();
+            self.send_rst();
         }
     }
 }
-
-pub trait CanSendData {}
-impl CanSendData for TCPConnection<Established, SenderEstablished, ReceiverEstablished> {}
-
-pub trait CanReceiveData {}
-impl CanReceiveData for TCPConnection<Established, SenderEstablished, ReceiverEstablished> {}
-impl CanReceiveData for TCPConnection<FinWait1, SenderFinSent, ReceiverEstablished> {}
-impl CanReceiveData for TCPConnection<FinWait2, SenderFinAcknowledged, ReceiverEstablished> {}
-
-impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> where Self: CanSendData {}
-
-impl<T: TCPState, S: SenderState, R: ReceiverState> TCPConnection<T, S, R> where Self: CanReceiveData
-{}

@@ -1,4 +1,4 @@
-use crate::util::buffer::{BufferError, BufferList};
+use crate::util::buffer::BufferList;
 
 #[derive(Default, Debug)]
 pub struct ByteStream {
