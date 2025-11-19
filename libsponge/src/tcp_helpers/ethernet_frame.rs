@@ -5,10 +5,6 @@ pub struct EthernetFrame {
     payload: BufferList,
 }
 
-// BufferList EthernetFrame::serialize() const {
-
-// }
-
 impl EthernetFrame {
     pub fn parse(&mut self, buf: Buffer) -> Result<(), ParseError> {
         let mut p = NetParser::new(buf);

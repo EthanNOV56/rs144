@@ -1,16 +1,23 @@
 use std::{
-    io::{Error, Read, Write},
+    ffi::c_void,
     os::unix::io::RawFd,
     sync::{Arc, Mutex},
+    usize,
 };
 
-#[derive(Debug, Default)]
+const BUFFER_SIZE: usize = 1024 * 1024;
+
+use anyhow::Result;
+
+use crate::{BufferViewList, TaggedError, system_call};
+
+#[derive(Clone)]
 struct FDWrapper {
     pub fd: RawFd,
     pub eof: bool,
     pub closed: bool,
-    pub read_count: u32,
-    pub write_count: u32,
+    pub read_count: usize,
+    pub write_count: usize,
 }
 
 impl FDWrapper {
@@ -20,46 +27,38 @@ impl FDWrapper {
         }
         FDWrapper {
             fd,
-            ..Default::default()
+            eof: false,
+            closed: false,
+            read_count: 0,
+            write_count: 0,
         }
     }
 
-    pub fn close(&mut self) {
+    pub fn close(&mut self) -> Result<(), TaggedError> {
         if !self.closed {
+            system_call("close fd", || unsafe { libc::close(self.fd) })?;
             self.closed = true;
             self.eof = true;
-            unsafe {
-                libc::close(self.fd);
-            }
         }
+        Ok(())
     }
 }
 
 impl Drop for FDWrapper {
     fn drop(&mut self) {
         if !self.closed {
-            self.close();
+            self.close()
+                .unwrap_or_else(|err| eprintln!("Error closing file descriptor: {}", err));
         }
     }
 }
 
-#[derive(Debug, Default, Clone)]
-struct FileDescriptor {
+#[derive(Clone)]
+pub struct FileDescriptor {
     internal_fd: Arc<Mutex<FDWrapper>>,
 }
 
 impl FileDescriptor {
-    pub fn new(fd: RawFd) -> Self {
-        FileDescriptor {
-            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
-            ..Default::default()
-        }
-    }
-
-    pub fn close(&mut self) {
-        self.internal_fd.lock().unwrap().close();
-    }
-
     fn register_read(&mut self) {
         self.internal_fd.lock().unwrap().read_count += 1;
     }
@@ -67,8 +66,20 @@ impl FileDescriptor {
     fn register_write(&mut self) {
         self.internal_fd.lock().unwrap().write_count += 1;
     }
+}
 
-    pub fn fd_num(&self) -> i32 {
+impl FileDescriptor {
+    pub fn new(fd: RawFd) -> Self {
+        Self {
+            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
+        }
+    }
+
+    pub fn close(&mut self) {
+        self.internal_fd.lock().unwrap().close();
+    }
+
+    pub fn fd(&self) -> i32 {
         self.internal_fd.lock().unwrap().fd
     }
 
@@ -80,47 +91,102 @@ impl FileDescriptor {
         self.internal_fd.lock().unwrap().closed
     }
 
-    pub fn read_count(&self) -> u32 {
+    pub fn read_count(&self) -> usize {
         self.internal_fd.lock().unwrap().read_count
     }
 
-    pub fn write_count(&self) -> u32 {
+    pub fn write_count(&self) -> usize {
         self.internal_fd.lock().unwrap().write_count
     }
 
-    pub fn set_blocking(&mut self, blocking: bool) -> std::io::Result<()> {
-        let guard = self.internal_fd.lock().unwrap();
-        let mut flags = unsafe { libc::fcntl(guard.fd, libc::F_GETFL) };
-        if flags < 0 {
-            return Err(Error::last_os_error());
-        }
+    pub fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
+        let mut fd = self.internal_fd.lock().unwrap().fd;
+        let flags = system_call("fcntl", || unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
         if blocking {
-            flags &= !libc::O_NONBLOCK;
+            flags ^= (flags & libc::O_NONBLOCK);
         } else {
             flags |= libc::O_NONBLOCK;
         }
-        let ret = unsafe { libc::fcntl(guard.fd, libc::F_SETFL, flags) };
-        if ret < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
+        system_call("fcntl", || unsafe { libc::fcntl(fd, flags) })?;
         Ok(())
     }
 }
 
-// //! Read up to `limit` bytes
-// std::string read(const size_t limit = std::numeric_limits<size_t>::max());
+impl FileDescriptor {
+    pub fn read(&mut self, limit: Option<usize>) -> Result<Vec<u8>, TaggedError> {
+        let lmt = limit.unwrap_or(usize::MAX);
+        let mut ret = Vec::with_capacity(lmt);
+        self.read_into_vec(&mut ret, lmt)?;
+        Ok(ret)
+    }
 
-// //! Read up to `limit` bytes into `str` (caller can allocate storage)
-// void read(std::string &str, const size_t limit = std::numeric_limits<size_t>::max());
+    pub fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<(), TaggedError> {
+        let mut fdw = self.internal_fd.lock().unwrap();
+        let size_to_read = BUFFER_SIZE.min(limit);
+        buf.resize(size_to_read, 0);
 
-// //! Write a string, possibly blocking until all is written
-// size_t write(const char *str, const bool write_all = true) { return write(BufferViewList(str), write_all); }
+        let bytes_read = system_call("read", || unsafe {
+            libc::read(fdw.fd, buf.as_mut_ptr() as *mut c_void, size_to_read as _)
+        })?;
+        if limit > 0 && fdw.read_count == 0 {
+            fdw.eof = true;
+        }
 
-// //! Write a string, possibly blocking until all is written
-// size_t write(const std::string &str, const bool write_all = true) { return write(BufferViewList(str), write_all); }
+        if fdw.read_count > size_to_read {
+            return Err(TaggedError::new(
+                "read() read more than requested",
+                std::io::Error::last_os_error(),
+            ));
+        }
 
-// //! Write a buffer (or list of buffers), possibly blocking until all is written
-// size_t write(BufferViewList buffer, const bool write_all = true);
+        buf.resize(size_to_read, 0);
+        self.register_read();
+        Ok(())
+    }
+}
 
-// //! Set blocking(true) or non-blocking(false)
-// void set_blocking(const bool blocking_state);
+impl FileDescriptor {
+    // //! Write a string, possibly blocking until all is written
+    // size_t write(const char *str, const bool write_all = true) { return write(BufferViewList(str), write_all); }
+
+    // //! Write a string, possibly blocking until all is written
+    // size_t write(const std::string &str, const bool write_all = true) { return write(BufferViewList(str), write_all); }
+
+    // //! Write a buffer (or list of buffers), possibly blocking until all is written
+    // size_t write(BufferViewList buffer, const bool write_all = true);
+    pub fn write<'a>(
+        &mut self,
+        buf: impl Into<BufferViewList<'a>>,
+        write_all: bool,
+    ) -> Result<usize, TaggedError> {
+        let mut fdw = self.internal_fd.lock().unwrap();
+        let mut total_written = 0;
+        let mut buf: BufferViewList = buf.into();
+        loop {
+            let iovecs = buf.as_iovecs();
+            let bytes_written = system_call("writev", || unsafe {
+                libc::writev(fdw, iovecs.as_ptr(), iovecs.len() as libc::c_int)
+            })?;
+            if bytes_written == 0 && buf.len() != 0 {
+                return Err(TaggedError::new(
+                    "write returned 0 given non-empty input buffer",
+                    std::io::Error::last_os_error(),
+                ));
+            }
+
+            if bytes_written as usize > buf.len() {
+                return Err(TaggedError::new(
+                    "write() wrote more than length of input buffer",
+                    std::io::Error::last_os_error(),
+                ));
+            }
+
+            self.register_write();
+            buf.try_remove_prefix(bytes_written as _)?;
+            if !write_all || buf.len() == 0 {
+                break;
+            }
+        }
+        Ok(total_written)
+    }
+}

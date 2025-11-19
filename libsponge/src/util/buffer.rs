@@ -249,7 +249,7 @@ impl BufferList {
 }
 
 #[derive(Debug)]
-struct BufferViewList<'a> {
+pub struct BufferViewList<'a> {
     views: VecDeque<&'a [u8]>,
 }
 
@@ -313,7 +313,7 @@ impl<'a> BufferViewList<'a> {
         }
         Err(BufferError::IndexOutOfBounds)
     }
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.views.iter().map(|view| view.len()).sum()
     }
     pub fn as_iovecs(&self) -> Vec<IoSlice<'_>> {
