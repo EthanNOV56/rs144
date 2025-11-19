@@ -1,15 +1,15 @@
+use crate::{BufferViewList, TaggedError, system_call};
+
+use anyhow::{Error, Result};
+use libc::{c_int, c_void, iovec};
+
 use std::{
-    ffi::c_void,
     os::unix::io::RawFd,
     sync::{Arc, Mutex},
     usize,
 };
 
 const BUFFER_SIZE: usize = 1024 * 1024;
-
-use anyhow::Result;
-
-use crate::{BufferViewList, TaggedError, system_call};
 
 #[derive(Clone)]
 struct FDWrapper {
@@ -58,15 +58,15 @@ pub struct FileDescriptor {
     internal_fd: Arc<Mutex<FDWrapper>>,
 }
 
-impl FileDescriptor {
-    fn register_read(&mut self) {
-        self.internal_fd.lock().unwrap().read_count += 1;
-    }
+// impl FileDescriptor {
+//     fn register_read(&mut self) {
+//         self.internal_fd.lock().unwrap().read_count += 1;
+//     }
 
-    fn register_write(&mut self) {
-        self.internal_fd.lock().unwrap().write_count += 1;
-    }
-}
+//     fn register_write(&mut self) {
+//         self.internal_fd.lock().unwrap().write_count += 1;
+//     }
+// }
 
 impl FileDescriptor {
     pub fn new(fd: RawFd) -> Self {
@@ -75,8 +75,9 @@ impl FileDescriptor {
         }
     }
 
-    pub fn close(&mut self) {
-        self.internal_fd.lock().unwrap().close();
+    pub fn close(&mut self) -> Result<(), Error> {
+        self.internal_fd.lock().unwrap().close()?;
+        Ok(())
     }
 
     pub fn fd(&self) -> i32 {
@@ -99,11 +100,12 @@ impl FileDescriptor {
         self.internal_fd.lock().unwrap().write_count
     }
 
+    #[allow(unused)]
     pub fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
         let mut fd = self.internal_fd.lock().unwrap().fd;
-        let flags = system_call("fcntl", || unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
+        let mut flags = system_call("fcntl", || unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
         if blocking {
-            flags ^= (flags & libc::O_NONBLOCK);
+            flags ^= flags & libc::O_NONBLOCK;
         } else {
             flags |= libc::O_NONBLOCK;
         }
@@ -132,7 +134,7 @@ impl FileDescriptor {
             fdw.eof = true;
         }
 
-        if fdw.read_count > size_to_read {
+        if bytes_read > size_to_read as _ {
             return Err(TaggedError::new(
                 "read() read more than requested",
                 std::io::Error::last_os_error(),
@@ -140,50 +142,47 @@ impl FileDescriptor {
         }
 
         buf.resize(size_to_read, 0);
-        self.register_read();
+        fdw.read_count += 1;
         Ok(())
     }
 }
 
 impl FileDescriptor {
-    // //! Write a string, possibly blocking until all is written
-    // size_t write(const char *str, const bool write_all = true) { return write(BufferViewList(str), write_all); }
-
-    // //! Write a string, possibly blocking until all is written
-    // size_t write(const std::string &str, const bool write_all = true) { return write(BufferViewList(str), write_all); }
-
-    // //! Write a buffer (or list of buffers), possibly blocking until all is written
-    // size_t write(BufferViewList buffer, const bool write_all = true);
     pub fn write<'a>(
         &mut self,
         buf: impl Into<BufferViewList<'a>>,
         write_all: bool,
-    ) -> Result<usize, TaggedError> {
+    ) -> Result<usize> {
         let mut fdw = self.internal_fd.lock().unwrap();
         let mut total_written = 0;
         let mut buf: BufferViewList = buf.into();
         loop {
             let iovecs = buf.as_iovecs();
             let bytes_written = system_call("writev", || unsafe {
-                libc::writev(fdw, iovecs.as_ptr(), iovecs.len() as libc::c_int)
+                libc::writev(
+                    fdw.fd,
+                    iovecs.as_ptr() as *const iovec,
+                    iovecs.len() as c_int,
+                )
             })?;
-            if bytes_written == 0 && buf.len() != 0 {
-                return Err(TaggedError::new(
+
+            if bytes_written == 0 && buf.is_empty() {
+                return Err(Error::new(TaggedError::unix(
                     "write returned 0 given non-empty input buffer",
-                    std::io::Error::last_os_error(),
-                ));
+                )));
             }
 
             if bytes_written as usize > buf.len() {
-                return Err(TaggedError::new(
+                return Err(Error::new(TaggedError::new(
                     "write() wrote more than length of input buffer",
                     std::io::Error::last_os_error(),
-                ));
+                )));
             }
 
-            self.register_write();
+            fdw.write_count += 1;
             buf.try_remove_prefix(bytes_written as _)?;
-            if !write_all || buf.len() == 0 {
+            total_written += bytes_written as usize;
+            if !write_all || buf.is_empty() {
                 break;
             }
         }

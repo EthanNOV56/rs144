@@ -313,9 +313,17 @@ impl<'a> BufferViewList<'a> {
         }
         Err(BufferError::IndexOutOfBounds)
     }
+
+    #[inline(always)]
     pub fn len(&self) -> usize {
         self.views.iter().map(|view| view.len()).sum()
     }
+
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        self.views.iter().any(|v| v.is_empty())
+    }
+
     pub fn as_iovecs(&self) -> Vec<IoSlice<'_>> {
         self.views.iter().map(|view| IoSlice::new(view)).collect()
     }

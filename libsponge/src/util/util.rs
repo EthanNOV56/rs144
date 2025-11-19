@@ -1,13 +1,14 @@
-use std::error::Error;
-use std::fmt;
-use std::io;
-use std::ops::AddAssign;
-use std::ops::Mul;
-use std::ops::MulAssign;
-use std::ops::ShlAssign;
-use std::time::{SystemTime, UNIX_EPOCH};
+use libc::{c_int, ssize_t};
+use thiserror::Error;
 
-#[derive(Debug)]
+use std::{
+    io,
+    ops::{AddAssign, Mul, MulAssign, ShlAssign},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+#[derive(Error, Debug)]
+#[error("{attempt} failed: {source}")]
 pub struct TaggedError {
     attempt: String,
     source: io::Error,
@@ -26,24 +27,32 @@ impl TaggedError {
     }
 }
 
-impl fmt::Display for TaggedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.attempt, self.source)
+pub trait SyscallReturn: PartialEq + Copy {
+    const ERROR_VALUE: Self;
+    fn is_error(self) -> bool;
+}
+
+impl SyscallReturn for c_int {
+    const ERROR_VALUE: Self = -1;
+    fn is_error(self) -> bool {
+        self == -1
     }
 }
 
-impl Error for TaggedError {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        Some(&self.source)
+impl SyscallReturn for ssize_t {
+    const ERROR_VALUE: Self = -1;
+    fn is_error(self) -> bool {
+        self == -1
     }
 }
 
-pub fn system_call<F>(attempt: &str, f: F) -> Result<i32, TaggedError>
+pub fn system_call<F, R>(attempt: &str, f: F) -> Result<R, TaggedError>
 where
-    F: FnOnce() -> i32,
+    F: FnOnce() -> R,
+    R: SyscallReturn,
 {
     let result = f();
-    if result < 0 {
+    if result.is_error() {
         Err(TaggedError::unix(attempt))
     } else {
         Ok(result)
