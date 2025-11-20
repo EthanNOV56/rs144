@@ -1,44 +1,89 @@
-use crate::{Address, BufferViewList, FDImpl, FDInner, FileDescriptor, RawAddr, system_call};
+use crate::{Address, BufferViewList, FDImpl, FDWrapper, FileDescriptor, RawAddr, system_call};
 
 use anyhow::Result;
 use libc::{
     AF_INET, AF_UNIX, MSG_TRUNC, SHUT_RD, SHUT_RDWR, SHUT_WR, SO_DOMAIN, SO_REUSEADDR, SO_TYPE,
-    SOCK_DGRAM, SOCK_STREAM, SOL_SOCKET, accept, bind, c_int, c_void, connect, getsockopt, iovec,
-    listen, msghdr, recvfrom, sendmsg, setsockopt, shutdown, sockaddr, socket, socklen_t,
+    SOCK_DGRAM, SOCK_STREAM, SOL_SOCKET, accept, bind, c_int, c_void, connect, getpeername,
+    getsockname, getsockopt, iovec, listen, msghdr, recvfrom, sendmsg, setsockopt, shutdown,
+    sockaddr, socket, socklen_t,
 };
 
-use std::{mem::size_of, os::fd::RawFd};
+use std::{
+    mem::size_of,
+    os::fd::RawFd,
+    sync::{Arc, Mutex},
+};
 
 struct Socket {
-    internal_fd: FDInner,
+    internal_fd: Arc<Mutex<FDWrapper>>,
 }
 
 pub struct TCPSocket {
-    internal_fd: FDInner,
+    internal_fd: Arc<Mutex<FDWrapper>>,
 }
 
 pub struct UDPSocket {
-    internal_fd: FDInner,
+    internal_fd: Arc<Mutex<FDWrapper>>,
 }
 
 pub struct LocalStreamSocket {
-    internal_fd: FDInner,
+    internal_fd: Arc<Mutex<FDWrapper>>,
 }
 
-impl FDImpl for Socket {}
-impl FDImpl for TCPSocket {}
-impl FDImpl for UDPSocket {}
-impl FDImpl for LocalStreamSocket {}
+impl FDImpl for Socket {
+    fn from_raw(fd: RawFd) -> Self {
+        Self {
+            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
+        }
+    }
+
+    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
+        &self.internal_fd
+    }
+}
+impl FDImpl for TCPSocket {
+    fn from_raw(fd: RawFd) -> Self {
+        Self {
+            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
+        }
+    }
+
+    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
+        &self.internal_fd
+    }
+}
+impl FDImpl for UDPSocket {
+    fn from_raw(fd: RawFd) -> Self {
+        Self {
+            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
+        }
+    }
+
+    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
+        &self.internal_fd
+    }
+}
+impl FDImpl for LocalStreamSocket {
+    fn from_raw(fd: RawFd) -> Self {
+        Self {
+            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
+        }
+    }
+
+    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
+        &self.internal_fd
+    }
+}
 
 pub trait SocketImpl: FDImpl {
     fn get_addr<F>(&self, func_name: &str, func: F) -> Result<Address>
     where
         F: FnOnce(i32, *mut sockaddr, *mut socklen_t) -> i32,
     {
-        let mut addr = RawAddr::new();
+        let mut addr = RawAddr::default();
         let size = std::mem::size_of::<RawAddr>();
-        system_call(func_name, func(self.fd(), addr.as_mut_ptr(), size as _));
-        Ok(Address::new(size, addr))
+        system_call(func_name, || func(self.fd(), addr.as_mut_ptr(), size as _));
+        Ok(Address::new(size as _, addr.storage))
     }
 
     fn try_build(fd: Option<FileDescriptor>, domain: i32, ty: i32) -> Result<Self> {
@@ -127,17 +172,17 @@ pub trait SocketImpl: FDImpl {
 
     #[inline]
     fn local_addr(&self) -> Result<Address> {
-        self.get_addr("getsockname", getsockname)
+        self.get_addr("getsockname", |i, j, k| unsafe { getsockname(i, j, k) })
     }
 
     #[inline]
     fn peer_addr(&self) -> Result<Address> {
-        self.get_addr("getpeername", getpeername)
+        self.get_addr("getpeername", |i, j, k| unsafe { getpeername(i, j, k) })
     }
 
     #[inline]
     fn set_reuseaddr(&mut self) -> Result<()> {
-        self.set_opt(SOL_SOCKET, SO_REUSEADDR, true as _)
+        self.set_opt(SOL_SOCKET, SO_REUSEADDR, true as i32)
     }
 }
 
