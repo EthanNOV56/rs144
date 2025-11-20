@@ -1,13 +1,12 @@
 use anyhow::{Error, Ok, Result};
-use itertools::structs;
 use libc::{
     AF_INET, AI_ALL, AI_NUMERICHOST, AI_NUMERICSERV, addrinfo, freeaddrinfo, getaddrinfo,
-    getnameinfo, sockaddr, sockaddr_in, sockaddr_storage, socklen_t,
+    getnameinfo, in_addr, sockaddr, sockaddr_in, sockaddr_storage, socklen_t,
 };
 
 use crate::TaggedError;
 
-use std::mem::zeroed;
+use std::{mem::zeroed, ptr::null_mut};
 
 struct GAIError(String);
 
@@ -17,10 +16,23 @@ impl From<String> for GAIError {
     }
 }
 
-#[derive(PartialEq, Eq)]
+impl Into<String> for GAIError {
+    fn into(self) -> String {
+        format!("GAIError: {}", self.0)
+    }
+}
+
 pub struct RawAddr {
     pub storage: sockaddr_storage,
 }
+
+impl PartialEq for RawAddr {
+    fn eq(&self, other: &Self) -> bool {
+        self.storage.ss_family == other.storage.ss_family
+    }
+}
+
+impl Eq for RawAddr {}
 
 impl Default for RawAddr {
     fn default() -> Self {
@@ -54,8 +66,15 @@ pub struct Address {
 
 impl Address {
     fn try_from_node(node: &str, service: &str, hints: &addrinfo) -> Result<Self> {
-        let mut resolved_address = ptr::null_mut();
-        let gai_ret = unsafe { getaddrinfo(node, service, hints, &mut resolved_address) };
+        let mut resolved_address = null_mut();
+        let gai_ret = unsafe {
+            getaddrinfo(
+                node as *const str as *const i8,
+                service as *const str as *const i8,
+                hints,
+                &mut resolved_address,
+            )
+        };
         if gai_ret != 0 {
             return Err(Error::new(TaggedError::unix(GAIError::from(
                 "getaddrinfo".to_string(),
@@ -66,22 +85,34 @@ impl Address {
                 "No address found".to_string(),
             ))));
         }
-        let addrinfo_dropper = |x| unsafe { freeaddrinfo(x) };
-        let wrapped_address = Box::new(addrinfo_dropper(resolved_address));
-        let addr = RawAddr::new();
-        let size = wrapped_address.ai_addrlen;
-        Ok(Self { size, addr })
+
+        struct AddrInfoGuard(*mut addrinfo);
+        impl Drop for AddrInfoGuard {
+            fn drop(&mut self) {
+                unsafe { freeaddrinfo(self.0) };
+            }
+        }
+        let _guard = AddrInfoGuard(resolved_address);
+
+        unsafe {
+            let addr = (*resolved_address).ai_addr as *mut sockaddr_storage;
+            let size = (*resolved_address).ai_addrlen;
+            Ok(Self {
+                size,
+                addr: RawAddr { storage: *addr },
+            })
+        }
     }
 }
 
 #[inline]
 fn make_hints(ai_flags: i32, ai_family: i32) -> addrinfo {
     unsafe {
-        let mut hints = zeroed();
+        let mut hints: addrinfo = zeroed();
+        hints.ai_flags = ai_flags;
+        hints.ai_family = ai_family;
+        hints
     }
-    hints.ai_flags = ai_flags;
-    hints.ai_family = ai_family;
-    hints
 }
 
 impl Address {
@@ -90,22 +121,23 @@ impl Address {
         Self::try_from_node(hostname, service, &hints)
     }
 
-    pub fn try_from_string(ip: &str, port: impl Into<&str>) -> Result<Self> {
+    pub fn try_from_string<'a>(ip: &'a str, port: impl Into<&'a str>) -> Result<Self> {
         let hints = make_hints(AI_NUMERICHOST | AI_NUMERICSERV, AF_INET);
         Self::try_from_node(ip, port.into(), &hints)
     }
 }
 
-impl TryFrom<*const sockaddr> for Address {
+impl TryFrom<(*const sockaddr, usize)> for Address {
     type Error = Error;
 
-    fn try_from(addr: *const sockaddr, size: usize) -> Result<Self> {
-        if size > mem::size_of::<sockaddr_storage>() {
-            return Err(Error::new("invalid sockaddr size"));
+    fn try_from(addr_and_size: (*const sockaddr, usize)) -> Result<Self> {
+        let (addr, size) = addr_and_size;
+        if size > size_of::<sockaddr_storage>() {
+            return Err(Error::new(TaggedError::unix("invalid sockaddr size")));
         }
 
         if addr.is_null() {
-            return Err(Error::new("null pointer"));
+            return Err(Error::new(TaggedError::unix("null pointer")));
         }
 
         unsafe {
@@ -115,17 +147,20 @@ impl TryFrom<*const sockaddr> for Address {
                 &mut storage as *mut _ as *mut u8,
                 size,
             );
+            Ok(Self {
+                size: size as _,
+                addr: storage.into(),
+            })
         }
-        Ok(Self {
-            size,
-            addr: storage.into(),
-        })
     }
 }
 
 impl Address {
-    pub fn new(size: usize, addr: sockaddr_storage) -> Self {
-        Self { size, addr }
+    pub fn new(size: u32, addr: sockaddr_storage) -> Self {
+        Self {
+            size,
+            addr: RawAddr { storage: addr },
+        }
     }
 
     pub fn ip_port(&mut self) -> Result<(String, u16)> {
@@ -137,12 +172,12 @@ impl Address {
 
         match unsafe {
             getnameinfo(
-                self.into(),
-                socklen_t,
-                ip_buf.as_mut_ptr(),
-                ip_buf.len(),
-                port_buf.as_mut_ptr(),
-                port_buf.len(),
+                &self.addr.storage as *const sockaddr_storage as *const sockaddr,
+                self.size,
+                ip_buf.as_mut_ptr() as _,
+                ip_buf.len() as _,
+                port_buf.as_mut_ptr() as _,
+                port_buf.len() as _,
                 AI_NUMERICHOST | AI_NUMERICSERV,
             )
         } {
@@ -153,19 +188,17 @@ impl Address {
                 ))));
             }
         }
+        let port: u16 = String::from_utf8_lossy(&port_buf).into_owned().parse()?;
 
-        Ok((
-            String::from_utf8_lossy(&ip_buf).into_owned(),
-            u16::from_str(&String::from_utf8_lossy(&port_buf).into_owned()).unwrap(),
-        ))
+        Ok((String::from_utf8_lossy(&ip_buf).into_owned(), port))
     }
 
-    pub fn ip(&self) -> Result<String> {
+    pub fn ip(&mut self) -> Result<String> {
         let (ip, _) = self.ip_port()?;
         Ok(ip)
     }
 
-    pub fn port(&self) -> Result<u16> {
+    pub fn port(&mut self) -> Result<u16> {
         let (_, port) = self.ip_port()?;
         Ok(port)
     }
@@ -185,11 +218,14 @@ pub struct IPv4NUM(u32);
 impl TryInto<IPv4NUM> for Address {
     type Error = Error;
 
-    fn try_into(mut self) -> Result<IPv4NUM> {
-        if self.addr.storage.ss_family != AF_INET || self.size != mem::size_of::<sockaddr_in>() {
-            Err(Error::InvalidAddress)
+    fn try_into(self) -> Result<IPv4NUM> {
+        if self.addr.storage.ss_family as i32 != AF_INET
+            || self.size as usize != size_of::<sockaddr_in>()
+        {
+            Err(Error::new(TaggedError::unix("InvalidAddress")))
         } else {
-            let ipv4_addr = unsafe { *(self.addr.storage.as_ptr() as *const sockaddr_in) };
+            let ipv4_addr =
+                unsafe { *(&self.addr.storage as *const sockaddr_storage as *const sockaddr_in) };
             Ok(IPv4NUM(u32::from_be(ipv4_addr.sin_addr.s_addr)))
         }
     }
@@ -197,8 +233,8 @@ impl TryInto<IPv4NUM> for Address {
 
 impl From<IPv4NUM> for Address {
     fn from(ip_address: IPv4NUM) -> Self {
-        let mut ipv4_addr = sockaddr_in {
-            sin_family: AF_INET,
+        let ipv4_addr = sockaddr_in {
+            sin_family: AF_INET as _,
             sin_port: 0,
             sin_addr: in_addr {
                 s_addr: u32::to_be(ip_address.0),
@@ -206,8 +242,12 @@ impl From<IPv4NUM> for Address {
             sin_zero: [0; 8],
         };
         Self {
-            addr: ipv4_addr,
-            size: mem::size_of::<sockaddr_in>(),
+            addr: unsafe {
+                RawAddr {
+                    storage: *(&ipv4_addr as *const sockaddr_in as *const sockaddr_storage),
+                }
+            },
+            size: size_of::<sockaddr_in>() as _,
         }
     }
 }

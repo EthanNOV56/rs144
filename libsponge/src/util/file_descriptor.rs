@@ -59,6 +59,7 @@ pub struct FileDescriptor {
 }
 
 pub trait FDImpl {
+    type Self = FileDescriptor;
     fn from_raw(fd: RawFd) -> Self {
         Self {
             internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
