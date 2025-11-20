@@ -1,16 +1,24 @@
 pub mod address;
 pub use address::*;
+
 pub mod buffer;
 pub use buffer::*;
+
 pub mod event_loop;
 pub use event_loop::*;
+
 pub mod file_descriptor;
 pub use file_descriptor::*;
+pub type FDInner = std::sync::Arc<std::sync::Mutex<FDWrapper>>;
+
 pub mod parser;
 pub use parser::*;
+
 pub mod socket;
 pub use socket::*;
+
 pub mod tun;
 pub use tun::*;
+
 pub mod util;
 pub use util::*;

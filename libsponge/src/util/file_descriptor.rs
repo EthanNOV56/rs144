@@ -4,7 +4,7 @@ use anyhow::{Error, Result};
 use libc::{c_int, c_void, iovec};
 
 use std::{
-    os::unix::io::RawFd,
+    os::fd::RawFd,
     sync::{Arc, Mutex},
     usize,
 };
@@ -12,7 +12,7 @@ use std::{
 const BUFFER_SIZE: usize = 1024 * 1024;
 
 #[derive(Clone)]
-struct FDWrapper {
+pub(super) struct FDWrapper {
     pub fd: RawFd,
     pub eof: bool,
     pub closed: bool,
@@ -58,50 +58,40 @@ pub struct FileDescriptor {
     internal_fd: Arc<Mutex<FDWrapper>>,
 }
 
-// impl FileDescriptor {
-//     fn register_read(&mut self) {
-//         self.internal_fd.lock().unwrap().read_count += 1;
-//     }
-
-//     fn register_write(&mut self) {
-//         self.internal_fd.lock().unwrap().write_count += 1;
-//     }
-// }
-
-impl FileDescriptor {
-    pub fn new(fd: RawFd) -> Self {
+pub trait FDImpl {
+    fn from_raw(fd: RawFd) -> Self {
         Self {
             internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
         }
     }
 
-    pub fn close(&mut self) -> Result<(), Error> {
+    fn close(&mut self) -> Result<(), Error> {
         self.internal_fd.lock().unwrap().close()?;
         Ok(())
     }
 
-    pub fn fd(&self) -> i32 {
+    fn fd(&self) -> i32 {
         self.internal_fd.lock().unwrap().fd
     }
 
-    pub fn eof(&self) -> bool {
+    fn eof(&self) -> bool {
         self.internal_fd.lock().unwrap().eof
     }
 
-    pub fn closed(&self) -> bool {
+    fn closed(&self) -> bool {
         self.internal_fd.lock().unwrap().closed
     }
 
-    pub fn read_count(&self) -> usize {
+    fn read_count(&self) -> usize {
         self.internal_fd.lock().unwrap().read_count
     }
 
-    pub fn write_count(&self) -> usize {
+    fn write_count(&self) -> usize {
         self.internal_fd.lock().unwrap().write_count
     }
 
     #[allow(unused)]
-    pub fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
+    fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
         let mut fd = self.internal_fd.lock().unwrap().fd;
         let mut flags = system_call("fcntl", || unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
         if blocking {
@@ -112,17 +102,15 @@ impl FileDescriptor {
         system_call("fcntl", || unsafe { libc::fcntl(fd, flags) })?;
         Ok(())
     }
-}
 
-impl FileDescriptor {
-    pub fn read(&mut self, limit: Option<usize>) -> Result<Vec<u8>, TaggedError> {
+    fn read(&mut self, limit: Option<usize>) -> Result<Vec<u8>, TaggedError> {
         let lmt = limit.unwrap_or(usize::MAX);
         let mut ret = Vec::with_capacity(lmt);
         self.read_into_vec(&mut ret, lmt)?;
         Ok(ret)
     }
 
-    pub fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<(), TaggedError> {
+    fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<(), TaggedError> {
         let mut fdw = self.internal_fd.lock().unwrap();
         let size_to_read = BUFFER_SIZE.min(limit);
         buf.resize(size_to_read, 0);
@@ -145,14 +133,8 @@ impl FileDescriptor {
         fdw.read_count += 1;
         Ok(())
     }
-}
 
-impl FileDescriptor {
-    pub fn write<'a>(
-        &mut self,
-        buf: impl Into<BufferViewList<'a>>,
-        write_all: bool,
-    ) -> Result<usize> {
+    fn write<'a>(&mut self, buf: impl Into<BufferViewList<'a>>, write_all: bool) -> Result<usize> {
         let mut fdw = self.internal_fd.lock().unwrap();
         let mut total_written = 0;
         let mut buf: BufferViewList = buf.into();
@@ -188,4 +170,14 @@ impl FileDescriptor {
         }
         Ok(total_written)
     }
+
+    fn register_read(&mut self) {
+        self.internal_fd.lock().unwrap().read_count += 1;
+    }
+
+    fn register_write(&mut self) {
+        self.internal_fd.lock().unwrap().write_count += 1;
+    }
 }
+
+impl FDImpl for FileDescriptor {}

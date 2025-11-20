@@ -7,6 +7,8 @@ use libc::{
 
 use crate::TaggedError;
 
+use std::mem::zeroed;
+
 struct GAIError(String);
 
 impl From<String> for GAIError {
@@ -20,6 +22,14 @@ pub struct RawAddr {
     pub storage: sockaddr_storage,
 }
 
+impl Default for RawAddr {
+    fn default() -> Self {
+        Self {
+            storage: unsafe { zeroed() },
+        }
+    }
+}
+
 impl From<sockaddr_storage> for RawAddr {
     fn from(storage: sockaddr_storage) -> Self {
         Self { storage }
@@ -27,14 +37,6 @@ impl From<sockaddr_storage> for RawAddr {
 }
 
 impl RawAddr {
-    pub fn new() -> Self {
-        unsafe {
-            Self {
-                storage: std::mem::zeroed(),
-            }
-        }
-    }
-
     pub fn as_ptr(&self) -> *const sockaddr {
         &self.storage as *const _ as *const sockaddr
     }
@@ -44,12 +46,10 @@ impl RawAddr {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Default)]
 pub struct Address {
     size: socklen_t,
     addr: RawAddr,
-    ip: Option<String>,
-    port: Option<u16>,
 }
 
 impl Address {
@@ -70,18 +70,15 @@ impl Address {
         let wrapped_address = Box::new(addrinfo_dropper(resolved_address));
         let addr = RawAddr::new();
         let size = wrapped_address.ai_addrlen;
-        Ok(Self {
-            size,
-            addr,
-            ip: None,
-            port: None,
-        })
+        Ok(Self { size, addr })
     }
 }
 
 #[inline]
 fn make_hints(ai_flags: i32, ai_family: i32) -> addrinfo {
-    let mut hints = mem::zeroed();
+    unsafe {
+        let mut hints = zeroed();
+    }
     hints.ai_flags = ai_flags;
     hints.ai_family = ai_family;
     hints
@@ -112,7 +109,7 @@ impl TryFrom<*const sockaddr> for Address {
         }
 
         unsafe {
-            let mut storage: sockaddr_storage = mem::zeroed();
+            let mut storage: sockaddr_storage = zeroed();
             std::ptr::copy_nonoverlapping(
                 addr as *const u8,
                 &mut storage as *mut _ as *mut u8,
@@ -122,13 +119,15 @@ impl TryFrom<*const sockaddr> for Address {
         Ok(Self {
             size,
             addr: storage.into(),
-            ip: None,
-            port: None,
         })
     }
 }
 
 impl Address {
+    pub fn new(size: usize, addr: sockaddr_storage) -> Self {
+        Self { size, addr }
+    }
+
     pub fn ip_port(&mut self) -> Result<(String, u16)> {
         const NI_MAXHOST: usize = 1025;
         const NI_MAXSERV: usize = 32;
@@ -209,8 +208,6 @@ impl From<IPv4NUM> for Address {
         Self {
             addr: ipv4_addr,
             size: mem::size_of::<sockaddr_in>(),
-            ip: Some(ipv4_addr.sin_addr.s_addr),
-            port: None,
         }
     }
 }

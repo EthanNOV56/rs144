@@ -321,7 +321,7 @@ impl<'a> BufferViewList<'a> {
 
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
-        self.views.iter().any(|v| v.is_empty())
+        self.views.iter().all(|v| v.is_empty())
     }
 
     pub fn as_iovecs(&self) -> Vec<IoSlice<'_>> {
