@@ -1,4 +1,4 @@
-use crate::{BufferViewList, TaggedError, system_call};
+use crate::{BufferViewList, FDInner, TaggedError, system_call};
 
 use anyhow::{Error, Result};
 use libc::{c_int, c_void, iovec};
@@ -59,41 +59,38 @@ pub struct FileDescriptor {
 }
 
 pub trait FDImpl {
-    type Self = FileDescriptor;
-    fn from_raw(fd: RawFd) -> Self {
-        Self {
-            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
-        }
-    }
+    fn from_raw(fd: RawFd) -> Self;
+
+    fn inner(&self) -> &FDInner;
 
     fn close(&mut self) -> Result<(), Error> {
-        self.internal_fd.lock().unwrap().close()?;
+        self.inner().lock().unwrap().close()?;
         Ok(())
     }
 
     fn fd(&self) -> i32 {
-        self.internal_fd.lock().unwrap().fd
+        self.inner().lock().unwrap().fd
     }
 
     fn eof(&self) -> bool {
-        self.internal_fd.lock().unwrap().eof
+        self.inner().lock().unwrap().eof
     }
 
     fn closed(&self) -> bool {
-        self.internal_fd.lock().unwrap().closed
+        self.inner().lock().unwrap().closed
     }
 
     fn read_count(&self) -> usize {
-        self.internal_fd.lock().unwrap().read_count
+        self.inner().lock().unwrap().read_count
     }
 
     fn write_count(&self) -> usize {
-        self.internal_fd.lock().unwrap().write_count
+        self.inner().lock().unwrap().write_count
     }
 
     #[allow(unused)]
     fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
-        let mut fd = self.internal_fd.lock().unwrap().fd;
+        let mut fd = self.inner().lock().unwrap().fd;
         let mut flags = system_call("fcntl", || unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
         if blocking {
             flags ^= flags & libc::O_NONBLOCK;
@@ -112,7 +109,7 @@ pub trait FDImpl {
     }
 
     fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<(), TaggedError> {
-        let mut fdw = self.internal_fd.lock().unwrap();
+        let mut fdw = self.inner().lock().unwrap();
         let size_to_read = BUFFER_SIZE.min(limit);
         buf.resize(size_to_read, 0);
 
@@ -136,7 +133,7 @@ pub trait FDImpl {
     }
 
     fn write<'a>(&mut self, buf: impl Into<BufferViewList<'a>>, write_all: bool) -> Result<usize> {
-        let mut fdw = self.internal_fd.lock().unwrap();
+        let mut fdw = self.inner().lock().unwrap();
         let mut total_written = 0;
         let mut buf: BufferViewList = buf.into();
         loop {
@@ -173,12 +170,22 @@ pub trait FDImpl {
     }
 
     fn register_read(&mut self) {
-        self.internal_fd.lock().unwrap().read_count += 1;
+        self.inner().lock().unwrap().read_count += 1;
     }
 
     fn register_write(&mut self) {
-        self.internal_fd.lock().unwrap().write_count += 1;
+        self.inner().lock().unwrap().write_count += 1;
     }
 }
 
-impl FDImpl for FileDescriptor {}
+impl FDImpl for FileDescriptor {
+    fn from_raw(fd: RawFd) -> Self {
+        Self {
+            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
+        }
+    }
+
+    fn inner(&self) -> &FDInner {
+        &self.internal_fd
+    }
+}
