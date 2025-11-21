@@ -1,9 +1,10 @@
-use crate::{BufferViewList, FDInner, TaggedError, system_call};
+use crate::{BufferViewList, TaggedError, system_call};
 
 use anyhow::{Error, Result};
 use libc::{c_int, c_void, iovec};
 
 use std::{
+    marker::PhantomData,
     os::fd::RawFd,
     sync::{Arc, Mutex},
     usize,
@@ -12,7 +13,7 @@ use std::{
 const BUFFER_SIZE: usize = 1024 * 1024;
 
 #[derive(Clone)]
-pub struct FDWrapper {
+struct FDWrapper {
     pub fd: RawFd,
     pub eof: bool,
     pub closed: bool,
@@ -54,43 +55,45 @@ impl Drop for FDWrapper {
 }
 
 #[derive(Clone)]
-pub struct FileDescriptor {
+pub struct FileDescriptor<A, S, P> {
     internal_fd: Arc<Mutex<FDWrapper>>,
+    adapter: A,
+
+    _is_socket: PhantomData<S>,
+    _protocol: PhantomData<P>,
 }
 
-pub trait FDImpl {
-    fn from_raw(fd: RawFd) -> Self;
+struct DummyAdapter;
 
-    fn inner(&self) -> &FDInner;
-
-    fn close(&mut self) -> Result<(), Error> {
-        self.inner().lock().unwrap().close()?;
+impl<A, S, P> FileDescriptor<A, S, P> {
+    pub fn close(&self) -> Result<(), Error> {
+        self.internal_fd.lock().unwrap().close()?;
         Ok(())
     }
 
-    fn fd(&self) -> i32 {
-        self.inner().lock().unwrap().fd
+    pub fn fd(&self) -> i32 {
+        self.internal_fd.lock().unwrap().fd
     }
 
-    fn eof(&self) -> bool {
-        self.inner().lock().unwrap().eof
+    pub fn eof(&self) -> bool {
+        self.internal_fd.lock().unwrap().eof
     }
 
-    fn closed(&self) -> bool {
-        self.inner().lock().unwrap().closed
+    pub fn closed(&self) -> bool {
+        self.internal_fd.lock().unwrap().closed
     }
 
-    fn read_count(&self) -> usize {
-        self.inner().lock().unwrap().read_count
+    pub fn read_count(&self) -> usize {
+        self.internal_fd.lock().unwrap().read_count
     }
 
-    fn write_count(&self) -> usize {
-        self.inner().lock().unwrap().write_count
+    pub fn write_count(&self) -> usize {
+        self.internal_fd.lock().unwrap().write_count
     }
 
     #[allow(unused)]
-    fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
-        let mut fd = self.inner().lock().unwrap().fd;
+    pub fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
+        let mut fd = self.internal_fd.lock().unwrap().fd;
         let mut flags = system_call("fcntl", || unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
         if blocking {
             flags ^= flags & libc::O_NONBLOCK;
@@ -101,15 +104,15 @@ pub trait FDImpl {
         Ok(())
     }
 
-    fn read(&mut self, limit: Option<usize>) -> Result<Vec<u8>, TaggedError> {
+    pub fn read(&mut self, limit: Option<usize>) -> Result<Vec<u8>, TaggedError> {
         let lmt = limit.unwrap_or(usize::MAX);
         let mut ret = Vec::with_capacity(lmt);
         self.read_into_vec(&mut ret, lmt)?;
         Ok(ret)
     }
 
-    fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<(), TaggedError> {
-        let mut fdw = self.inner().lock().unwrap();
+    pub fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<(), TaggedError> {
+        let mut fdw = self.internal_fd.lock().unwrap();
         let size_to_read = BUFFER_SIZE.min(limit);
         buf.resize(size_to_read, 0);
 
@@ -132,8 +135,12 @@ pub trait FDImpl {
         Ok(())
     }
 
-    fn write<'a>(&mut self, buf: impl Into<BufferViewList<'a>>, write_all: bool) -> Result<usize> {
-        let mut fdw = self.inner().lock().unwrap();
+    pub fn write<'a>(
+        &mut self,
+        buf: impl Into<BufferViewList<'a>>,
+        write_all: bool,
+    ) -> Result<usize> {
+        let mut fdw = self.internal_fd.lock().unwrap();
         let mut total_written = 0;
         let mut buf: BufferViewList = buf.into();
         loop {
@@ -169,23 +176,26 @@ pub trait FDImpl {
         Ok(total_written)
     }
 
-    fn register_read(&mut self) {
-        self.inner().lock().unwrap().read_count += 1;
+    pub fn register_read(&mut self) {
+        self.internal_fd.lock().unwrap().read_count += 1;
     }
 
-    fn register_write(&mut self) {
-        self.inner().lock().unwrap().write_count += 1;
+    pub fn register_write(&mut self) {
+        self.internal_fd.lock().unwrap().write_count += 1;
     }
 }
 
-impl FDImpl for FileDescriptor {
-    fn from_raw(fd: RawFd) -> Self {
+impl<A, S, P> From<RawFd> for FileDescriptor<A, S, P> {
+    fn from(fd: RawFd) -> Self {
         Self {
             internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
+            adapter: DummyAdapter::new(),
+            _is_socket: PhantomData::<S>,
+            _protocol: PhantomData::<P>,
         }
     }
-
-    fn inner(&self) -> &FDInner {
-        &self.internal_fd
-    }
 }
+
+struct DummySocket;
+struct DummyProtocol;
+pub type NakedFileDescriptor = FileDescriptor<DummyAdapter, DummySocket, DummyProtocol>;

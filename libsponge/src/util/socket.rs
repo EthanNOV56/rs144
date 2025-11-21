@@ -1,4 +1,4 @@
-use crate::{Address, BufferViewList, FDImpl, FDWrapper, FileDescriptor, RawAddr, system_call};
+use crate::{Address, BufferViewList, FileDescriptor, NakedFileDescriptor, RawAddr, system_call};
 
 use anyhow::Result;
 use libc::{
@@ -8,74 +8,12 @@ use libc::{
     sockaddr, socket, socklen_t,
 };
 
-use std::{
-    mem::size_of,
-    os::fd::RawFd,
-    sync::{Arc, Mutex},
-};
+use std::{mem::size_of, os::fd::RawFd};
 
-struct Socket {
-    internal_fd: Arc<Mutex<FDWrapper>>,
-}
+struct SocketImpl;
+pub type Socket<A, P> = FileDescriptor<A, SocketImpl, P>;
 
-pub struct TCPSocket {
-    internal_fd: Arc<Mutex<FDWrapper>>,
-}
-
-pub struct UDPSocket {
-    internal_fd: Arc<Mutex<FDWrapper>>,
-}
-
-pub struct LocalStreamSocket {
-    internal_fd: Arc<Mutex<FDWrapper>>,
-}
-
-impl FDImpl for Socket {
-    fn from_raw(fd: RawFd) -> Self {
-        Self {
-            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
-        }
-    }
-
-    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
-        &self.internal_fd
-    }
-}
-impl FDImpl for TCPSocket {
-    fn from_raw(fd: RawFd) -> Self {
-        Self {
-            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
-        }
-    }
-
-    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
-        &self.internal_fd
-    }
-}
-impl FDImpl for UDPSocket {
-    fn from_raw(fd: RawFd) -> Self {
-        Self {
-            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
-        }
-    }
-
-    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
-        &self.internal_fd
-    }
-}
-impl FDImpl for LocalStreamSocket {
-    fn from_raw(fd: RawFd) -> Self {
-        Self {
-            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
-        }
-    }
-
-    fn inner(&self) -> &Arc<Mutex<FDWrapper>> {
-        &self.internal_fd
-    }
-}
-
-pub trait SocketImpl: FDImpl {
+impl<A, P> Socket<A, P> {
     fn get_addr<F>(&self, func_name: &str, func: F) -> Result<Address>
     where
         F: FnOnce(i32, *mut sockaddr, *mut socklen_t) -> i32,
@@ -86,11 +24,11 @@ pub trait SocketImpl: FDImpl {
         Ok(Address::new(size as _, addr.storage))
     }
 
-    fn try_build(fd: Option<FileDescriptor>, domain: i32, ty: i32) -> Result<Self> {
+    fn try_build(fd: Option<NakedFileDescriptor>, domain: i32, ty: i32) -> Result<Socket<A, P>> {
         match fd {
             None => {
                 let fd = system_call("socket", || unsafe { socket(domain, ty, 0) })?;
-                Ok(Self::from(fd as RawFd))
+                Ok(Socket::from(fd as RawFd))
             }
             Some(fd) => {
                 let mut val: c_void;
@@ -122,7 +60,7 @@ pub trait SocketImpl: FDImpl {
                     return Err(Error::new(ErrorKind::Other, "socket type mismatch"));
                 }
 
-                Ok(Self { fd })
+                Ok(Socket::from(fd as _))
             }
         }
     }
@@ -141,7 +79,7 @@ pub trait SocketImpl: FDImpl {
     }
 
     #[inline]
-    fn connect(&mut self, address: &Address) -> Result<()> {
+    pub fn connect(&mut self, address: &Address) -> Result<()> {
         system_call("connect", || unsafe {
             connect(
                 self.fd.fd() as _,
@@ -152,7 +90,7 @@ pub trait SocketImpl: FDImpl {
     }
 
     #[inline]
-    fn bind(&mut self, addr: &Address) -> Result<()> {
+    pub fn bind(&mut self, addr: &Address) -> Result<()> {
         system_call("bind", || unsafe {
             bind(self.fd.fd() as _, addr.as_ptr(), addr.len() as socklen_t)
         })?;
@@ -160,7 +98,7 @@ pub trait SocketImpl: FDImpl {
     }
 
     #[inline]
-    fn shutdown(&mut self, how: i32) -> Result<()> {
+    pub fn shutdown(&mut self, how: i32) -> Result<()> {
         system_call("shutdown", || unsafe { shutdown(self.fd.fd() as _, how) })?;
         match how {
             SHUT_RD => self.register_read(),
@@ -171,28 +109,30 @@ pub trait SocketImpl: FDImpl {
     }
 
     #[inline]
-    fn local_addr(&self) -> Result<Address> {
+    pub fn local_addr(&self) -> Result<Address> {
         self.get_addr("getsockname", |i, j, k| unsafe { getsockname(i, j, k) })
     }
 
     #[inline]
-    fn peer_addr(&self) -> Result<Address> {
+    pub fn peer_addr(&self) -> Result<Address> {
         self.get_addr("getpeername", |i, j, k| unsafe { getpeername(i, j, k) })
     }
 
     #[inline]
-    fn set_reuseaddr(&mut self) -> Result<()> {
+    pub fn set_reuseaddr(&mut self) -> Result<()> {
         self.set_opt(SOL_SOCKET, SO_REUSEADDR, true as i32)
     }
 }
 
-impl SocketImpl for Socket {}
-impl SocketImpl for TCPSocket {}
-impl SocketImpl for UDPSocket {}
-impl SocketImpl for LocalStreamSocket {}
+struct TCP;
+pub type TCPSocket<A> = Socket<A, TCP>;
+struct UDP;
+pub type UDPSocket<A> = Socket<A, UDP>;
+struct LS;
+pub type LSSocket<A> = Socket<A, LS>;
 
-trait TCPSockImpl: SocketImpl {
-    fn try_from_fd(fd: FileDescriptor) -> Result<Self> {
+impl<A> TCPSocket<A> {
+    fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_INET, SOCK_STREAM)
     }
 
@@ -206,17 +146,15 @@ trait TCPSockImpl: SocketImpl {
         })
     }
 
-    pub fn accept(&mut self) -> Result<TCPSocket> {
+    pub fn accept(&mut self) -> Result<TCPSocket<A>> {
         self.register_read();
         let raw = system_call("accept", || unsafe {
             accept(self.fd(), std::ptr::null_mut(), std::ptr::null_mut())
         })?;
 
-        Self::try_from_fd(FileDescriptor::from_raw(raw))
+        Self::try_from_fd(NakedFileDescriptor::from(raw))
     }
 }
-
-impl TCPSockImpl for TCPSocket {}
 
 #[derive(Default)]
 struct RcvdDatagram {
@@ -253,8 +191,8 @@ fn send_helper(
     }
 }
 
-trait UDPSockImpl: SocketImpl {
-    fn try_from_fd(fd: FileDescriptor) -> Result<Self> {
+impl<A> UDPSocket<A> {
+    fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_INET, SOCK_DGRAM)
     }
 
@@ -318,12 +256,8 @@ trait UDPSockImpl: SocketImpl {
     }
 }
 
-impl UDPSockImpl for UDPSocket {}
-
-trait LocalStreamSockImpl {
-    fn try_from_fd(fd: FileDescriptor) -> Result<Self> {
+impl<A> LSSocket<A> {
+    fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_UNIX, SOCK_STREAM)
     }
 }
-
-impl LocalStreamSockImpl for LocalStreamSocket {}
