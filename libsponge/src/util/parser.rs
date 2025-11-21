@@ -1,8 +1,8 @@
-use std::ops::{AddAssign, BitAnd, Shl, ShlAssign, Shr};
-
 use crate::util::buffer::Buffer;
 
 use thiserror::Error;
+
+use std::ops::{AddAssign, BitAnd, Shl, ShlAssign, Shr};
 
 #[derive(Debug, Error, Clone, Copy)]
 pub enum ParseError {

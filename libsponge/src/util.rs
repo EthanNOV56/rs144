@@ -9,7 +9,6 @@ pub use event_loop::*;
 
 pub mod file_descriptor;
 pub use file_descriptor::*;
-pub type FDInner = std::sync::Arc<std::sync::Mutex<FDWrapper>>;
 
 pub mod parser;
 pub use parser::*;

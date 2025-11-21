@@ -1,4 +1,20 @@
-pub struct TCPSpongeSocket;
+use std::{sync::atomic::AtomicBool, thread::JoinHandle};
+
+use crate::{EventLoop, LSSocket, TCPConnection};
+
+pub struct TCPSpongeSocket<A> {
+    thread_data: LSSocket<A>,
+    dgram_adapter: A,
+    tcp_connection: Option<TCPConnection>,
+    event_loop: EventLoop,
+    tcp_thread: JoinHandle,
+    abort: AtomicBool,
+    inbound_shutdown: bool,
+    outbound_shutdown: bool,
+    fully_acked: bool,
+}
+
+type TCPOverIPv4OverEthernetSpongeSocket = TCPSpongeSocket<TCPOverIPv4OverEthernetAdapter>;
 
 #[derive(Default)]
 pub struct FullStackSocket {

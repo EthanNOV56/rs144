@@ -1,4 +1,4 @@
-use crate::WrappingU32;
+use crate::{Address, WrappingU32};
 
 #[derive(Debug, Clone)]
 pub struct TCPConfig {
@@ -34,12 +34,10 @@ impl Default for TCPConfig {
     }
 }
 
-// //! Config for classes derived from FdAdapter
-// class FdAdapterConfig {
-//   public:
-//     Address source{"0", 0};       //!< Source address and port
-//     Address destination{"0", 0};  //!< Destination address and port
-
-//     uint16_t loss_rate_dn = 0;  //!< Downlink loss rate (for LossyFdAdapter)
-//     uint16_t loss_rate_up = 0;  //!< Uplink loss rate (for LossyFdAdapter)
-// };
+#[derive(Default)]
+pub struct FDAdapterConfig {
+    pub source: Address,
+    pub destination: Address,
+    pub loss_rate_dn: u16,
+    pub loss_rate_up: u16,
+}
