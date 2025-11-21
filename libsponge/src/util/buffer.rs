@@ -64,7 +64,7 @@ impl Buffer {
     }
 
     #[inline(always)]
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.as_ref().len()
     }
 
@@ -80,7 +80,7 @@ impl Buffer {
     }
 
     pub fn try_remove_prefix(&mut self, n: &mut usize) -> Result<&[u8], BufferError> {
-        let sz = self.size();
+        let sz = self.len();
 
         if *n > sz {
             return Err(BufferError::IndexOutOfBounds);
@@ -96,7 +96,7 @@ impl Buffer {
 
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
-        self.size() == 0
+        self.len() == 0
     }
 
     #[inline(always)]
@@ -199,7 +199,7 @@ impl BufferList {
     pub fn try_remove_prefix(&mut self, mut n: usize) -> Result<Vec<u8>, BufferError> {
         let mut vec = Vec::with_capacity(n);
         while let Some(buffer) = self.buffers.front_mut() {
-            let mut sub = n.min(buffer.size());
+            let mut sub = n.min(buffer.len());
             n -= sub;
             vec.extend(buffer.remove_prefix(&mut sub));
             if buffer.is_empty() {
@@ -216,7 +216,7 @@ impl BufferList {
     pub fn remove_prefix(&mut self, mut n: usize) -> Vec<u8> {
         let mut vec = Vec::with_capacity(n);
         while let Some(buffer) = self.buffers.front_mut() {
-            let mut sub = n.min(buffer.size());
+            let mut sub = n.min(buffer.len());
             n -= sub;
             vec.extend(buffer.remove_prefix(&mut sub));
             if buffer.is_empty() {

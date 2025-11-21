@@ -10,7 +10,7 @@ use std::{
 #[derive(Error, Debug)]
 #[error("{attempt} failed: {source}")]
 pub struct TaggedError {
-    attempt: String,
+    pub attempt: String,
     source: io::Error,
 }
 

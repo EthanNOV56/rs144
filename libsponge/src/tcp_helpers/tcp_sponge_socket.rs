@@ -4,7 +4,7 @@ use crate::{
     EventLoop, LSSocket, TCPConnection, TCPOverIPv4OverEthernetAdapter, TCPOverIPv4OverTunFdAdapter,
 };
 
-pub struct TCPSpongeSocket<A> {
+pub struct TCPSpongeSocket<A: Default> {
     thread_data: LSSocket<A>,
     dgram_adapter: A,
     tcp_connection: Option<TCPConnection>,

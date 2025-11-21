@@ -20,7 +20,7 @@ impl TCPSegment {
 
         let mut p = NetParser::new(buffer);
         self.header.parse(&mut p);
-        self.payload = p.get_buffer_mut().take();
+        self.payload = p.buffer_mut().take();
         p.get_result()
     }
 
@@ -51,6 +51,6 @@ impl TCPSegment {
     }
 
     pub fn length_in_sequence_space(&self) -> usize {
-        self.payload.size() + (self.header.syn as usize) + (self.header.fin as usize)
+        self.payload.len() + (self.header.syn as usize) + (self.header.fin as usize)
     }
 }

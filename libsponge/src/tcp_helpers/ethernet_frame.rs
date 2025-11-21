@@ -9,7 +9,7 @@ impl EthernetFrame {
     pub fn parse(&mut self, buf: Buffer) -> Result<(), ParseError> {
         let mut p = NetParser::new(buf);
         self.header.parse(&mut p)?;
-        self.payload = p.get_buffer_mut().take().into();
+        self.payload = p.buffer_mut().take().into();
         p.get_result()
     }
 

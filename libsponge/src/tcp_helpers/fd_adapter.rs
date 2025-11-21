@@ -7,7 +7,7 @@ pub struct FDAdapterBase<T, L> {
     cfg: FDAdapterConfig,
     listen: bool,
 
-    _ty: PhantomData<T>,
+    _type: PhantomData<T>,
     _lossy: PhantomData<L>,
 }
 

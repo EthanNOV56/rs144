@@ -76,7 +76,7 @@ impl_unsigned_int!(u8, u16, u32);
 
 impl NetParser {
     fn check_size(&mut self, size: usize) {
-        if size > self.buffer.size() {
+        if size > self.buffer.len() {
             self.set_result(Err(ParseError::PacketTooShort));
         }
     }
@@ -104,11 +104,11 @@ impl NetParser {
         }
     }
 
-    pub fn get_buffer(&self) -> &Buffer {
+    pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
 
-    pub fn get_buffer_mut(&mut self) -> &mut Buffer {
+    pub fn buffer_mut(&mut self) -> &mut Buffer {
         &mut self.buffer
     }
 

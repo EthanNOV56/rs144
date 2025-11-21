@@ -32,7 +32,7 @@ impl EthernetHeader {
     const TYPE_ARP: u16 = 0x806;
 
     pub fn parse(&mut self, p: &mut NetParser) -> Result<(), ParseError> {
-        if p.get_buffer().size() < Self::LENGTH {
+        if p.buffer().len() < Self::LENGTH {
             return Err(ParseError::PacketTooShort);
         }
         self.dst.iter_mut().for_each(|byte| *byte = p.parse_u8());

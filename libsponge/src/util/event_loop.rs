@@ -1,9 +1,9 @@
-use crate::{Milliseconds, NakedFileDescriptor, system_call};
+use crate::{Milliseconds, NakedFileDescriptor, TaggedError, system_call};
 
-use libc::{POLLIN, POLLOUT, RawFd, nfds_t, poll, pollfd, pollfd};
+use libc::{POLLERR, POLLHUP, POLLIN, POLLNVAL, POLLOUT, nfds_t, poll, pollfd};
 use thiserror::Error;
 
-use std::collections::VecDeque;
+use std::{collections::VecDeque, os::fd::RawFd};
 
 enum Direction {
     In,
@@ -24,6 +24,14 @@ enum EventLoopError {
     BusyWait,
     #[error("Poll system call failed")]
     PollFailed,
+    #[error("Other error: {0}")]
+    OtherError(String),
+}
+
+impl From<TaggedError> for EventLoopError {
+    fn from(err: TaggedError) -> Self {
+        EventLoopError::OtherError(err.attempt)
+    }
 }
 
 enum EventAction {
@@ -33,7 +41,7 @@ enum EventAction {
 }
 
 pub trait EventHandler: Send {
-    fn on_event(&mut self, fd: RawFd, direction: Direction) -> EventAction;
+    fn on_event(&mut self, fd: RawFd, direction: &Direction) -> EventAction;
     fn serv_cnt(&self) -> usize;
 }
 
@@ -63,7 +71,7 @@ impl EventRule {
     }
 
     pub fn callback(&mut self) {
-        match self.handler.on_event(self.fd.into(), self.direction) {
+        match self.handler.on_event(self.fd.fd(), &self.direction) {
             EventAction::Continue => {}
             EventAction::Remove => {
                 todo!();
@@ -132,7 +140,7 @@ impl EventLoop {
             poll(
                 pollfds.as_ptr() as *mut pollfd,
                 pollfds.len() as nfds_t,
-                timeout_ms,
+                Into::<u64>::into(timeout_ms) as _,
             )
         })?;
 

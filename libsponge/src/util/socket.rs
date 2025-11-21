@@ -13,7 +13,7 @@ use std::{mem::size_of, os::fd::RawFd};
 struct SocketT;
 pub type Socket<A, P> = FileDescriptor<A, SocketT, P>;
 
-impl<A, P> Socket<A, P> {
+impl<A: Default, P> Socket<A, P> {
     fn get_addr<F>(&self, func_name: &str, func: F) -> Result<Address>
     where
         F: FnOnce(i32, *mut sockaddr, *mut socklen_t) -> i32,
@@ -131,7 +131,7 @@ pub type UDPSocket<A> = Socket<A, UDP>;
 struct LS;
 pub type LSSocket<A> = Socket<A, LS>;
 
-impl<A> TCPSocket<A> {
+impl<A: Default> TCPSocket<A> {
     fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_INET, SOCK_STREAM)
     }
@@ -191,7 +191,7 @@ fn send_helper(
     }
 }
 
-impl<A> UDPSocket<A> {
+impl<A: Default> UDPSocket<A> {
     fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_INET, SOCK_DGRAM)
     }
@@ -256,7 +256,7 @@ impl<A> UDPSocket<A> {
     }
 }
 
-impl<A> LSSocket<A> {
+impl<A: Default> LSSocket<A> {
     fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_UNIX, SOCK_STREAM)
     }
