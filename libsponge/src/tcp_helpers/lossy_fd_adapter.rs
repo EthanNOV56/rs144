@@ -4,7 +4,8 @@ use rand::random;
 
 struct Lossy;
 pub struct NoneLossy;
-type LossyFDAdaptor<T> = FDAdapterBase<T, Lossy>;
+pub type LossyFDAdaptor<T> = FDAdapterBase<T, Lossy>;
+pub type FDAdaptor<T> = FDAdapterBase<T, NoneLossy>;
 
 impl<T> LossyFDAdaptor<T> {
     fn should_drop(&self, uplink: bool) -> bool {

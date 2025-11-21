@@ -1,9 +1,13 @@
-use crate::FDAdapterBase;
+use crate::{FDAdaptor, InternetDatagram, TCPSegment};
+
+pub trait ToI {}
 
 struct TCPOverIPv4;
-type TCPOverIPv4Adapter<L> = FDAdapterBase<TCPOverIPv4, L>;
+impl ToI for TCPOverIPv4 {}
 
-impl<L> FDAdapterBase<TCPOverIPv4, L> {
-    // pub fn unwrap_tcp_in_ip(&self, ip_dgram: &InternetDatagram)
-    // pub fn wrap_tcp_in_ip()
+pub type TCPOverIPv4Adapter = FDAdaptor<TCPOverIPv4>;
+
+impl TCPOverIPv4Adapter {
+    pub fn unwrap_tcp_in_ip(&self, ip_dgram: &InternetDatagram) -> Option<TCPSegment> {}
+    pub fn wrap_tcp_in_ip(&self, tcp_seg: &TCPSegment) -> InternetDatagram {}
 }

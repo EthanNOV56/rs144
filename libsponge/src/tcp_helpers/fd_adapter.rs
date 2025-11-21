@@ -30,7 +30,3 @@ impl<T, L> FDAdapterBase<T, L> {
 
     fn tick(&mut self, elapsed: Milliseconds) {}
 }
-
-struct TCPOverUDP;
-
-type TCPOverUDPAdapter<L> = FDAdapterBase<TCPOverUDP, L>;

@@ -55,15 +55,15 @@ impl Drop for FDWrapper {
 }
 
 #[derive(Clone)]
-pub struct FileDescriptor<A, S, P> {
+pub struct FileDescriptor<A, T, P> {
     internal_fd: Arc<Mutex<FDWrapper>>,
     adapter: A,
 
-    _is_socket: PhantomData<S>,
+    _type: PhantomData<T>,
     _protocol: PhantomData<P>,
 }
 
-impl<A, S, P> FileDescriptor<A, S, P> {
+impl<A, T, P> FileDescriptor<A, T, P> {
     pub fn close(&self) -> Result<(), Error> {
         self.internal_fd.lock().unwrap().close()?;
         Ok(())
@@ -183,12 +183,12 @@ impl<A, S, P> FileDescriptor<A, S, P> {
     }
 }
 
-impl<A: Default, S, P> From<RawFd> for FileDescriptor<A, S, P> {
+impl<A: Default, T, P> From<RawFd> for FileDescriptor<A, T, P> {
     fn from(fd: RawFd) -> Self {
         Self {
             internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
             adapter: A::default(),
-            _is_socket: PhantomData::<S>,
+            _type: PhantomData::<T>,
             _protocol: PhantomData::<P>,
         }
     }
@@ -196,6 +196,6 @@ impl<A: Default, S, P> From<RawFd> for FileDescriptor<A, S, P> {
 
 #[derive(Default)]
 struct DummyAdapter;
-struct DummySocket;
+struct DummyType;
 struct DummyProtocol;
-pub type NakedFileDescriptor = FileDescriptor<DummyAdapter, DummySocket, DummyProtocol>;
+pub type NakedFileDescriptor = FileDescriptor<DummyAdapter, DummyType, DummyProtocol>;

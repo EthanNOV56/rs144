@@ -1,20 +1,26 @@
-use std::{sync::atomic::AtomicBool, thread::JoinHandle};
+use std::{sync::atomic::AtomicBool, thread};
 
-use crate::{EventLoop, LSSocket, TCPConnection};
+use crate::{
+    EventLoop, LSSocket, TCPConnection, TCPOverIPv4OverEthernetAdapter, TCPOverIPv4OverTunFdAdapter,
+};
 
 pub struct TCPSpongeSocket<A> {
     thread_data: LSSocket<A>,
     dgram_adapter: A,
     tcp_connection: Option<TCPConnection>,
     event_loop: EventLoop,
-    tcp_thread: JoinHandle,
+    // tcp_thread: thread,
     abort: AtomicBool,
     inbound_shutdown: bool,
     outbound_shutdown: bool,
     fully_acked: bool,
 }
 
-type TCPOverIPv4OverEthernetSpongeSocket = TCPSpongeSocket<TCPOverIPv4OverEthernetAdapter>;
+pub type TCPOverIPv4SpongeSocket = TCPSpongeSocket<TCPOverIPv4OverTunFdAdapter>;
+
+pub type RS144TCPSocket = TCPOverIPv4SpongeSocket;
+
+pub type TCPOverIPv4OverEthernetSpongeSocket = TCPSpongeSocket<TCPOverIPv4OverEthernetAdapter>;
 
 #[derive(Default)]
 pub struct FullStackSocket {

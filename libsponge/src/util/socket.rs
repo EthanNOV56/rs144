@@ -10,8 +10,8 @@ use libc::{
 
 use std::{mem::size_of, os::fd::RawFd};
 
-struct SocketImpl;
-pub type Socket<A, P> = FileDescriptor<A, SocketImpl, P>;
+struct SocketT;
+pub type Socket<A, P> = FileDescriptor<A, SocketT, P>;
 
 impl<A, P> Socket<A, P> {
     fn get_addr<F>(&self, func_name: &str, func: F) -> Result<Address>
