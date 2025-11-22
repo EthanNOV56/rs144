@@ -1,51 +1,41 @@
-use crate::{Buffer, BufferList, IPv4Header, NetParser};
+use crate::{Buffer, BufferList, IPv4Header, InternetChecksum, NetParser, ParseError};
 
 struct IPv4Datagram {
     header: IPv4Header,
     payload: BufferList,
 }
 
-// ParseResult IPv4Datagram::parse(const Buffer buffer) {
-
-// }
-
-// BufferList IPv4Datagram::serialize() const {
-//     if (_payload.size() != _header.payload_length()) {
-//         throw runtime_error("IPv4Datagram::serialize: payload is wrong size");
-//     }
-
-//     IPv4Header header_out = _header;
-//     header_out.cksum = 0;
-//     const string header_zero_checksum = header_out.serialize();
-
-//     // calculate checksum -- taken over header only
-//     InternetChecksum check;
-//     check.add(header_zero_checksum);
-//     header_out.cksum = check.value();
-
-//     BufferList ret;
-//     ret.append(header_out.serialize());
-//     ret.append(_payload);
-//     return ret;
-// }
-
 impl IPv4Datagram {
-    pub fn parse(&mut self, buf: Buffer) -> Result<Self, ParseError> {
+    pub fn try_parse(&mut self, buf: Buffer) -> Result<(), ParseError> {
         let mut p = NetParser::new(buf);
-        // self.header.pa
-        // self.payload = p.buffer();
+        self.header.try_parse(&mut p)?;
+        self.payload = p.buffer_mut().take().into();
 
-        //     NetParser p{buffer};
-        //     _header.parse(p);
-        //     _payload = p.buffer();
+        if self.payload.len() != self.header.payload_length() as usize {
+            return Err(ParseError::PacketTooShort);
+        }
 
-        //     if (_payload.size() != _header.payload_length()) {
-        //         return ParseResult::PacketTooShort;
-        //     }
-
-        //     return p.get_error();
+        p.get_result()
     }
-    // pub fn serialize(&self) -> BufferList {}
+    pub fn try_serialize(&self) -> Result<BufferList, ParseError> {
+        if self.payload.len() != self.header.payload_length() as usize {
+            return Err(ParseError::PayloadSizeMismatch);
+        }
+
+        let mut header_out = self.header;
+        header_out.cksum = 0;
+        let header_zero_checksum = header_out.try_serialize()?;
+
+        let mut checksum = InternetChecksum::default();
+        checksum.add(header_zero_checksum.as_slice());
+        header_out.cksum = checksum.value();
+
+        let mut ret = BufferList::default();
+        ret.append(header_out.try_serialize()?.into());
+        ret.append(self.payload.clone());
+
+        Ok(ret)
+    }
 
     pub fn header(&self) -> &IPv4Header {
         &self.header
