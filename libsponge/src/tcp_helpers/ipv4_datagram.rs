@@ -1,7 +1,7 @@
 use crate::{Buffer, BufferList, IPv4Header, InternetChecksum, NetParser, ParseError};
 
 #[derive(Default)]
-struct IPv4Datagram {
+pub struct IPv4Datagram {
     header: IPv4Header,
     payload: BufferList,
 }

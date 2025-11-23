@@ -45,7 +45,7 @@ pub trait EventHandler: Send {
     fn serv_cnt(&self) -> usize;
 }
 
-struct EventRule {
+pub struct EventRule {
     fd: NakedFileDescriptor,
     direction: Direction,
     handler: Box<dyn EventHandler>,

@@ -6,10 +6,10 @@ trait ToIoE: ToI {}
 impl ToI for TCPOverIPv4OverTUN {}
 impl ToI for TCPOverIPv4OverEthernet {}
 
-struct TCPOverIPv4OverTUN;
+pub struct TCPOverIPv4OverTUN;
 impl ToIoT for TCPOverIPv4OverTUN {}
 
-struct TCPOverIPv4OverEthernet;
+pub struct TCPOverIPv4OverEthernet;
 impl ToIoE for TCPOverIPv4OverEthernet {}
 
 pub type TCPOverIPv4OverTunFdAdapter = FDAdaptor<TCPOverIPv4OverTUN>;

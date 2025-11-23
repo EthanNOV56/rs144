@@ -1,11 +1,11 @@
-use libsponge::tcp_helpers::FullStackSocket;
+use libsponge::tcp_helpers::RS144TCPSocket;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
 fn get_url(host: &str, path: &str) -> std::io::Result<()> {
     println!("Connecting to {}", host);
-    let mut stream = TcpStream::connect(format!("{}:8080", host))?;
+    let mut stream = RS144TCPSocket::connect(format!("{}:8080", host))?;
     let request = format!(
         "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
         path, host

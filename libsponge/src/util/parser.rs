@@ -35,6 +35,7 @@ impl ParseError {
                 "Packet length is shorter than header claims".to_string()
             }
             ParseError::Unsupported => "Packet uses unsupported features".to_string(),
+            ParseError::PayloadSizeMismatch => "Payload size mismatch".to_string(),
         }
     }
 }

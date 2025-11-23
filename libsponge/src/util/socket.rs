@@ -26,22 +26,22 @@ pub enum SocketError {
     DatagramOversized(String),
 }
 
-struct SocketT;
+pub struct SocketT;
 pub type Socket<A, P> = FileDescriptor<A, SocketT, P>;
-impl<A: Default, P> From<NakedFileDescriptor> for Socket<A, P> {
+impl<A: Default + Clone, P> From<NakedFileDescriptor> for Socket<A, P> {
     fn from(fd: NakedFileDescriptor) -> Self {
         Socket::from(Into::<RawFd>::into(fd))
     }
 }
 
-impl<A: Default, P> Socket<A, P> {
+impl<A: Default + Clone, P> Socket<A, P> {
     fn get_addr<F>(&self, func_name: &str, func: F) -> Result<Address>
     where
         F: FnOnce(i32, *mut sockaddr, *mut socklen_t) -> i32,
     {
         let mut addr = RawAddr::default();
         let size = std::mem::size_of::<RawAddr>();
-        system_call(func_name, || func(self.fd(), addr.as_mut_ptr(), size as _));
+        system_call(func_name, || func(self.fd(), addr.as_mut_ptr(), size as _))?;
         Ok(Address::new(size as _, addr.storage))
     }
 
@@ -146,14 +146,14 @@ impl<A: Default, P> Socket<A, P> {
     }
 }
 
-struct TCP;
+pub struct TCP;
 pub type TCPSocket<A> = Socket<A, TCP>;
-struct UDP;
+pub struct UDP;
 pub type UDPSocket<A> = Socket<A, UDP>;
-struct LS;
+pub struct LS;
 pub type LSSocket<A> = Socket<A, LS>;
 
-impl<A: Default> TCPSocket<A> {
+impl<A: Default + Clone> TCPSocket<A> {
     fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_INET, SOCK_STREAM)
     }
@@ -180,7 +180,7 @@ impl<A: Default> TCPSocket<A> {
 }
 
 #[derive(Default)]
-struct RcvdDatagram {
+pub struct RcvdDatagram {
     src_addr: Address,
     pub payload: Vec<u8>,
 }
@@ -213,7 +213,7 @@ fn send_helper(
     }
 }
 
-impl<A: Default> UDPSocket<A> {
+impl<A: Default + Clone> UDPSocket<A> {
     fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_INET, SOCK_DGRAM)
     }
@@ -273,7 +273,7 @@ impl<A: Default> UDPSocket<A> {
     }
 }
 
-impl<A: Default> LSSocket<A> {
+impl<A: Default + Clone> LSSocket<A> {
     fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
         Self::try_build(Some(fd), AF_UNIX, SOCK_STREAM)
     }

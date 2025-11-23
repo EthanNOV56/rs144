@@ -34,7 +34,9 @@ impl DeviceType for Tap {
     const IFF_FLAG: c_int = IFF_TAP | IFF_NO_PI;
 }
 
-fn try_new_tuntap<A: Default, T: DeviceType, P>(dev_name: &str) -> Result<FileDescriptor<A, T, P>> {
+fn try_new_tuntap<A: Default + Clone, T: DeviceType, P>(
+    dev_name: &str,
+) -> Result<FileDescriptor<A, T, P>> {
     let fd = system_call("open", || unsafe {
         open(CLONEDEV as *const str as *const i8, O_RDWR)
     })?;
@@ -68,7 +70,7 @@ fn try_new_tuntap<A: Default, T: DeviceType, P>(dev_name: &str) -> Result<FileDe
 
 pub type TunFD<A, P> = FileDescriptor<A, Tun, P>;
 
-impl<A: Default, P> TunFD<A, P> {
+impl<A: Default + Clone, P> TunFD<A, P> {
     pub fn try_new(dev_name: &str) -> Result<Self> {
         try_new_tuntap(dev_name)
     }
@@ -76,7 +78,7 @@ impl<A: Default, P> TunFD<A, P> {
 
 pub type TapFD<A, P> = FileDescriptor<A, Tap, P>;
 
-impl<A: Default, P> TapFD<A, P> {
+impl<A: Default + Clone, P> TapFD<A, P> {
     pub fn try_new(dev_name: &str) -> Result<Self> {
         try_new_tuntap(dev_name)
     }
