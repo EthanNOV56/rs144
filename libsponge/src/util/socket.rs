@@ -1,4 +1,4 @@
-use crate::{Address, BufferViewList, FileDescriptor, NakedFileDescriptor, RawAddr, system_call};
+use crate::{Address, BufferViewList, FDWrapper, FileDescriptor, RawAddr, system_call};
 
 use anyhow::{Error, Result};
 use libc::{
@@ -26,15 +26,7 @@ pub enum SocketError {
     DatagramOversized(String),
 }
 
-pub struct SocketT;
-pub type Socket<A, P> = FileDescriptor<A, SocketT, P>;
-impl<A: Default + Clone, P> From<NakedFileDescriptor> for Socket<A, P> {
-    fn from(fd: NakedFileDescriptor) -> Self {
-        Socket::from(Into::<RawFd>::into(fd))
-    }
-}
-
-impl<A: Default + Clone, P> Socket<A, P> {
+pub trait Socket: FileDescriptor {
     fn get_addr<F>(&self, func_name: &str, func: F) -> Result<Address>
     where
         F: FnOnce(i32, *mut sockaddr, *mut socklen_t) -> i32,
@@ -45,18 +37,18 @@ impl<A: Default + Clone, P> Socket<A, P> {
         Ok(Address::new(size as _, addr.storage))
     }
 
-    fn try_build(fd: Option<NakedFileDescriptor>, domain: i32, ty: i32) -> Result<Socket<A, P>> {
+    fn try_build(fd: Option<FDWrapper>, domain: i32, ty: i32) -> Result<FDWrapper> {
         match fd {
             None => {
                 let fd = system_call("socket", || unsafe { socket(domain, ty, 0) })?;
-                Ok(Socket::from(fd as RawFd))
+                FDWrapper::try_from(fd)
             }
             Some(fd) => {
                 let mut val: c_int = unsafe { zeroed() };
                 let mut len: socklen_t = size_of::<i32>() as _;
                 system_call("getsockopt", || unsafe {
                     getsockopt(
-                        fd.fd() as _,
+                        fd.fd,
                         SOL_SOCKET,
                         SO_DOMAIN,
                         &mut val as *mut c_int as *mut c_void,
@@ -70,7 +62,7 @@ impl<A: Default + Clone, P> Socket<A, P> {
                 len = size_of::<c_int>() as _;
                 system_call("getsockopt", || unsafe {
                     getsockopt(
-                        fd.fd() as _,
+                        fd.fd,
                         SOL_SOCKET,
                         SO_TYPE,
                         &mut val as *mut c_int as *mut c_void,
@@ -81,7 +73,7 @@ impl<A: Default + Clone, P> Socket<A, P> {
                     return Err(Error::new(SocketError::SocketTypeMismatch));
                 }
 
-                Ok(Socket::from(fd))
+                FDWrapper::try_from(fd.fd)
             }
         }
     }
@@ -100,7 +92,7 @@ impl<A: Default + Clone, P> Socket<A, P> {
     }
 
     #[inline]
-    pub fn connect(&mut self, addr: &Address) -> Result<()> {
+    fn connect(&mut self, addr: &Address) -> Result<()> {
         system_call("connect", || unsafe {
             connect(self.fd() as _, addr.as_ptr(), addr.size)
         })?;
@@ -108,7 +100,7 @@ impl<A: Default + Clone, P> Socket<A, P> {
     }
 
     #[inline]
-    pub fn bind(&mut self, addr: &Address) -> Result<()> {
+    fn bind(&mut self, addr: &Address) -> Result<()> {
         system_call("bind", || unsafe {
             bind(self.fd() as _, addr.as_ptr(), addr.size)
         })?;
@@ -116,7 +108,7 @@ impl<A: Default + Clone, P> Socket<A, P> {
     }
 
     #[inline]
-    pub fn shutdown(&mut self, how: i32) -> Result<()> {
+    fn shutdown(&mut self, how: i32) -> Result<()> {
         system_call("shutdown", || unsafe { shutdown(self.fd() as _, how) })?;
         match how {
             SHUT_RD => self.register_read(),
@@ -131,51 +123,44 @@ impl<A: Default + Clone, P> Socket<A, P> {
     }
 
     #[inline]
-    pub fn local_addr(&self) -> Result<Address> {
+    fn local_addr(&self) -> Result<Address> {
         self.get_addr("getsockname", |i, j, k| unsafe { getsockname(i, j, k) })
     }
 
     #[inline]
-    pub fn peer_addr(&self) -> Result<Address> {
+    fn peer_addr(&self) -> Result<Address> {
         self.get_addr("getpeername", |i, j, k| unsafe { getpeername(i, j, k) })
     }
 
     #[inline]
-    pub fn set_reuseaddr(&mut self) -> Result<()> {
+    fn set_reuseaddr(&mut self) -> Result<()> {
         self.set_opt(SOL_SOCKET, SO_REUSEADDR, true as i32)
     }
 }
 
-pub struct TCP;
-pub type TCPSocket<A> = Socket<A, TCP>;
-pub struct UDP;
-pub type UDPSocket<A> = Socket<A, UDP>;
-pub struct LS;
-pub type LSSocket<A> = Socket<A, LS>;
-
-impl<A: Default + Clone> TCPSocket<A> {
-    fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
-        Self::try_build(Some(fd), AF_INET, SOCK_STREAM)
+pub trait TCPSocket: Socket {
+    fn try_from_fd(fd: Option<FDWrapper>) -> Result<FDWrapper> {
+        Self::try_build(fd, AF_INET, SOCK_STREAM)
     }
 
-    pub fn try_default() -> Result<Self> {
-        Self::try_build(None, AF_INET, SOCK_STREAM)
+    fn try_default() -> Result<FDWrapper> {
+        Self::try_from_fd(None)
     }
 
-    pub fn listen(&self, backlog: Option<i32>) -> Result<()> {
+    fn listen(&self, backlog: Option<i32>) -> Result<()> {
         system_call("listen", || unsafe {
             listen(self.fd(), backlog.unwrap_or(16))
         })?;
         Ok(())
     }
 
-    pub fn accept(&mut self) -> Result<TCPSocket<A>> {
+    fn accept(&mut self) -> Result<FDWrapper> {
         self.register_read();
         let raw = system_call("accept", || unsafe {
             accept(self.fd(), std::ptr::null_mut(), std::ptr::null_mut())
         })?;
 
-        Self::try_from_fd(NakedFileDescriptor::from(raw))
+        Self::try_from_fd(FDWrapper::try_from(raw).ok())
     }
 }
 
@@ -213,22 +198,22 @@ fn send_helper(
     }
 }
 
-impl<A: Default + Clone> UDPSocket<A> {
-    fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
-        Self::try_build(Some(fd), AF_INET, SOCK_DGRAM)
+pub trait UDPSocket: Socket {
+    fn try_from_fd(fd: Option<FDWrapper>) -> Result<FDWrapper> {
+        Self::try_build(fd, AF_INET, SOCK_DGRAM)
     }
 
-    pub fn try_default() -> Result<Self> {
+    fn try_default() -> Result<FDWrapper> {
         Self::try_build(None, AF_INET, SOCK_DGRAM)
     }
 
-    pub fn recv(&mut self, mtu: Option<usize>) -> Result<RcvdDatagram> {
+    fn recv(&mut self, mtu: Option<usize>) -> Result<RcvdDatagram> {
         let mut dg = RcvdDatagram::default();
         self.recv_into_datagram(&mut dg, mtu)?;
         Ok(dg)
     }
 
-    pub fn recv_into_datagram(
+    fn recv_into_datagram(
         &mut self,
         datagram: &mut RcvdDatagram,
         mtu: Option<usize>,
@@ -260,21 +245,21 @@ impl<A: Default + Clone> UDPSocket<A> {
         Ok(())
     }
 
-    pub fn send_to(&mut self, des: &mut Address, payload: &BufferViewList) -> Result<()> {
+    fn send_to(&mut self, des: &mut Address, payload: &BufferViewList) -> Result<()> {
         send_helper(self.fd(), des as *mut Address as *mut _, des.size, payload)?;
         self.register_write();
         Ok(())
     }
 
-    pub fn send(&mut self, payload: &BufferViewList) -> Result<()> {
+    fn send(&mut self, payload: &BufferViewList) -> Result<()> {
         send_helper(self.fd(), 0 as *mut Address as *mut _, 0, payload)?;
         self.register_write();
         Ok(())
     }
 }
 
-impl<A: Default + Clone> LSSocket<A> {
-    fn try_from_fd(fd: NakedFileDescriptor) -> Result<Self> {
-        Self::try_build(Some(fd), AF_UNIX, SOCK_STREAM)
+pub trait LSSocket: Socket {
+    fn try_from_fd(fd: Option<FDWrapper>) -> Result<FDWrapper> {
+        Self::try_build(fd, AF_UNIX, SOCK_STREAM)
     }
 }

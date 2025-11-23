@@ -12,7 +12,7 @@ use std::{
 const BUFFER_SIZE: usize = 1024 * 1024;
 
 #[derive(Clone)]
-struct FDWrapper {
+pub struct FDWrapper {
     pub fd: RawFd,
     pub eof: bool,
     pub closed: bool,
