@@ -4,7 +4,6 @@ use anyhow::{Error, Result};
 use libc::{c_int, c_void, iovec};
 
 use std::{
-    marker::PhantomData,
     os::fd::RawFd,
     sync::{Arc, Mutex},
     usize,
@@ -21,21 +20,26 @@ struct FDWrapper {
     pub write_count: usize,
 }
 
-impl FDWrapper {
-    pub fn new(fd: RawFd) -> Self {
+impl TryFrom<RawFd> for FDWrapper {
+    type Error = Error;
+
+    fn try_from(fd: RawFd) -> Result<Self, Self::Error> {
         if fd < 0 {
-            panic!("Invalid file descriptor");
-        }
-        FDWrapper {
-            fd,
-            eof: false,
-            closed: false,
-            read_count: 0,
-            write_count: 0,
+            Err(Error::msg("Invalid file descriptor"))
+        } else {
+            Ok(FDWrapper {
+                fd,
+                eof: false,
+                closed: false,
+                read_count: 0,
+                write_count: 0,
+            })
         }
     }
+}
 
-    pub fn close(&mut self) -> Result<(), TaggedError> {
+impl FDWrapper {
+    pub fn close(&mut self) -> Result<()> {
         if !self.closed {
             system_call("close fd", || unsafe { libc::close(self.fd) })?;
             self.closed = true;
@@ -54,44 +58,36 @@ impl Drop for FDWrapper {
     }
 }
 
-#[derive(Clone)]
-pub struct FileDescriptor<A: Default + Clone, T, P> {
-    internal_fd: Arc<Mutex<FDWrapper>>,
-    adapter: A,
+pub trait FileDescriptor: Send + Sync {
+    fn inner(&self) -> Arc<Mutex<FDWrapper>>;
 
-    _type: PhantomData<T>,
-    _protocol: PhantomData<P>,
-}
-
-impl<A: Default + Clone, T, P> FileDescriptor<A, T, P> {
-    pub fn close(&self) -> Result<(), Error> {
-        self.internal_fd.lock().unwrap().close()?;
-        Ok(())
+    fn close(&self) -> Result<()> {
+        self.inner().lock().unwrap().close()
     }
 
-    pub fn fd(&self) -> i32 {
-        self.internal_fd.lock().unwrap().fd
+    fn fd(&self) -> RawFd {
+        self.inner().lock().unwrap().fd
     }
 
-    pub fn eof(&self) -> bool {
-        self.internal_fd.lock().unwrap().eof
+    fn eof(&self) -> bool {
+        self.inner().lock().unwrap().eof
     }
 
-    pub fn closed(&self) -> bool {
-        self.internal_fd.lock().unwrap().closed
+    fn closed(&self) -> bool {
+        self.inner().lock().unwrap().closed
     }
 
-    pub fn read_count(&self) -> usize {
-        self.internal_fd.lock().unwrap().read_count
+    fn read_count(&self) -> usize {
+        self.inner().lock().unwrap().read_count
     }
 
-    pub fn write_count(&self) -> usize {
-        self.internal_fd.lock().unwrap().write_count
+    fn write_count(&self) -> usize {
+        self.inner().lock().unwrap().write_count
     }
 
     #[allow(unused)]
-    pub fn set_blocking(&mut self, blocking: bool) -> Result<(), TaggedError> {
-        let mut fd = self.internal_fd.lock().unwrap().fd;
+    fn set_blocking(&mut self, blocking: bool) -> Result<()> {
+        let mut fd = self.inner().lock().unwrap().fd;
         let mut flags = system_call("fcntl", || unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
         if blocking {
             flags ^= flags & libc::O_NONBLOCK;
@@ -102,118 +98,89 @@ impl<A: Default + Clone, T, P> FileDescriptor<A, T, P> {
         Ok(())
     }
 
-    pub fn read(&mut self, limit: Option<usize>) -> Result<Vec<u8>, TaggedError> {
+    fn read(&mut self, limit: Option<usize>) -> Result<Vec<u8>> {
         let lmt = limit.unwrap_or(usize::MAX);
         let mut ret = Vec::with_capacity(lmt);
         self.read_into_vec(&mut ret, lmt)?;
         Ok(ret)
     }
 
-    pub fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<(), TaggedError> {
-        let mut fdw = self.internal_fd.lock().unwrap();
-        let size_to_read = BUFFER_SIZE.min(limit);
-        buf.resize(size_to_read, 0);
+    fn read_into_vec(&mut self, buf: &mut Vec<u8>, limit: usize) -> Result<()> {
+        match self.inner().lock() {
+            Ok(mut fdw) => {
+                let size_to_read = BUFFER_SIZE.min(limit);
+                buf.resize(size_to_read, 0);
 
-        let bytes_read = system_call("read", || unsafe {
-            libc::read(fdw.fd, buf.as_mut_ptr() as *mut c_void, size_to_read as _)
-        })?;
-        if limit > 0 && fdw.read_count == 0 {
-            fdw.eof = true;
-        }
+                let bytes_read = system_call("read", || unsafe {
+                    libc::read(fdw.fd, buf.as_mut_ptr() as *mut c_void, size_to_read as _)
+                })?;
+                if limit > 0 && fdw.read_count == 0 {
+                    fdw.eof = true;
+                }
 
-        if bytes_read > size_to_read as _ {
-            return Err(TaggedError::new(
-                "read() read more than requested",
-                std::io::Error::last_os_error(),
-            ));
-        }
+                if bytes_read > size_to_read as _ {
+                    return Err(Error::new(TaggedError::unix(
+                        "read() read more than requested",
+                    )));
+                }
 
-        buf.resize(size_to_read, 0);
-        fdw.read_count += 1;
-        Ok(())
-    }
-
-    pub fn write<'a>(
-        &mut self,
-        buf: impl Into<BufferViewList<'a>>,
-        write_all: bool,
-    ) -> Result<usize> {
-        let mut fdw = self.internal_fd.lock().unwrap();
-        let mut total_written = 0;
-        let mut buf: BufferViewList = buf.into();
-        loop {
-            let iovecs = buf.as_iovecs();
-            let bytes_written = system_call("writev", || unsafe {
-                libc::writev(
-                    fdw.fd,
-                    iovecs.as_ptr() as *const iovec,
-                    iovecs.len() as c_int,
-                )
-            })?;
-
-            if bytes_written == 0 && buf.is_empty() {
-                return Err(Error::new(TaggedError::unix(
-                    "write returned 0 given non-empty input buffer",
-                )));
+                buf.resize(size_to_read, 0);
+                fdw.read_count += 1;
+                Ok(())
             }
+            Err(_) => Err(Error::new(TaggedError::unix(
+                "Failed to lock file descriptor",
+            ))),
+        }
+    }
 
-            if bytes_written as usize > buf.len() {
-                return Err(Error::new(TaggedError::new(
-                    "write() wrote more than length of input buffer",
-                    std::io::Error::last_os_error(),
-                )));
+    fn write<'a>(&mut self, buf: impl Into<BufferViewList<'a>>, write_all: bool) -> Result<usize> {
+        match self.inner().lock() {
+            Ok(mut fdw) => {
+                let mut total_written = 0;
+                let mut buf: BufferViewList = buf.into();
+                loop {
+                    let iovecs = buf.as_iovecs();
+                    let bytes_written = system_call("writev", || unsafe {
+                        libc::writev(
+                            fdw.fd,
+                            iovecs.as_ptr() as *const iovec,
+                            iovecs.len() as c_int,
+                        )
+                    })?;
+
+                    if bytes_written == 0 && buf.is_empty() {
+                        return Err(Error::new(TaggedError::unix(
+                            "write returned 0 given non-empty input buffer",
+                        )));
+                    }
+
+                    if bytes_written as usize > buf.len() {
+                        return Err(Error::new(TaggedError::unix(
+                            "write() wrote more than length of input buffer",
+                        )));
+                    }
+
+                    fdw.write_count += 1;
+                    buf.try_remove_prefix(bytes_written as _)?;
+                    total_written += bytes_written as usize;
+                    if !write_all || buf.is_empty() {
+                        break;
+                    }
+                }
+                Ok(total_written)
             }
-
-            fdw.write_count += 1;
-            buf.try_remove_prefix(bytes_written as _)?;
-            total_written += bytes_written as usize;
-            if !write_all || buf.is_empty() {
-                break;
-            }
-        }
-        Ok(total_written)
-    }
-
-    pub fn register_read(&mut self) {
-        self.internal_fd.lock().unwrap().read_count += 1;
-    }
-
-    pub fn register_write(&mut self) {
-        self.internal_fd.lock().unwrap().write_count += 1;
-    }
-}
-
-impl<A: Default + Clone, T, P> From<RawFd> for FileDescriptor<A, T, P> {
-    fn from(fd: RawFd) -> Self {
-        Self {
-            internal_fd: Arc::new(Mutex::new(FDWrapper::new(fd))),
-            adapter: A::default(),
-
-            _type: PhantomData::<T>,
-            _protocol: PhantomData::<P>,
+            _ => Err(Error::new(TaggedError::unix(
+                "failed to acquire lock on file descriptor",
+            ))),
         }
     }
-}
 
-impl<A: Default + Clone, T, P> Into<RawFd> for FileDescriptor<A, T, P> {
-    fn into(self) -> RawFd {
-        self.internal_fd.lock().unwrap().fd
+    fn register_read(&self) {
+        self.inner().lock().unwrap().read_count += 1;
     }
-}
 
-#[derive(Default, Clone)]
-pub struct NoneAdapter;
-pub struct NakedFD;
-pub struct NoneProtocol;
-pub type NakedFileDescriptor = FileDescriptor<NoneAdapter, NakedFD, NoneProtocol>;
-
-impl<A: Default + Clone, T, P> Into<NakedFileDescriptor> for &FileDescriptor<A, T, P> {
-    fn into(self) -> NakedFileDescriptor {
-        NakedFileDescriptor {
-            internal_fd: self.internal_fd.clone(),
-            adapter: NoneAdapter::default(),
-            _type: PhantomData::<NakedFD>,
-            _protocol: PhantomData::<NoneProtocol>,
-        }
+    fn register_write(&self) {
+        self.inner().lock().unwrap().write_count += 1;
     }
 }
