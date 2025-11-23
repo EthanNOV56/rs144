@@ -60,7 +60,7 @@ impl RawAddr {
 
 #[derive(PartialEq, Eq, Default)]
 pub struct Address {
-    size: socklen_t,
+    pub size: socklen_t,
     addr: RawAddr,
 }
 
@@ -201,6 +201,10 @@ impl Address {
     pub fn port(&mut self) -> Result<u16> {
         let (_, port) = self.ip_port()?;
         Ok(port)
+    }
+
+    pub fn as_ptr(&self) -> *const sockaddr {
+        self as *const Self as *const sockaddr
     }
 }
 
