@@ -1,19 +1,12 @@
-use crate::{Address, FDAdaptor, IPv4Header, IPv4NUM, InternetDatagram, TCPSegment};
-
-pub trait ToI {}
-
-struct TCPOverIPv4;
-impl ToI for TCPOverIPv4 {}
-
-pub type TCPOverIPv4Adapter = FDAdaptor<TCPOverIPv4>;
+use crate::{Address, FDAdapter, IPv4Header, IPv4NUM, InternetDatagram, TCPSegment};
 
 fn inet_ntoa(addr: u32) -> String {
     let octets = addr.to_be_bytes();
     format!("{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
 }
 
-impl TCPOverIPv4Adapter {
-    pub fn unwrap_tcp_in_ip(&mut self, ip_dgram: &InternetDatagram) -> Option<TCPSegment> {
+pub trait TCPOverIPv4Adapter: FDAdapter {
+    fn unwrap_tcp_in_ip(&mut self, ip_dgram: &InternetDatagram) -> Option<TCPSegment> {
         let dgram_src = IPv4NUM(ip_dgram.header().src);
         let dgram_dst = IPv4NUM(ip_dgram.header().dst);
         let cfg_src: IPv4NUM = (&self.cfg().source).try_into().ok()?;
@@ -65,7 +58,7 @@ impl TCPOverIPv4Adapter {
         Some(tcp_seg)
     }
 
-    pub fn wrap_tcp_in_ip(&mut self, tcp_seg: &mut TCPSegment) -> Option<InternetDatagram> {
+    fn wrap_tcp_in_ip(&mut self, tcp_seg: &mut TCPSegment) -> Option<InternetDatagram> {
         let mut ip_dgram = InternetDatagram::default();
 
         let src_addr = &mut self.cfg_mut().source;

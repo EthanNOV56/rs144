@@ -1,45 +1,33 @@
-use crate::FDAdapterBase;
+use crate::{FDAdapter, FileDescriptor, TCPSegment};
 
 use rand::random;
 
-struct Lossy;
-pub struct NoneLossy;
-pub type LossyFDAdaptor<T> = FDAdapterBase<T, Lossy>;
-pub type FDAdaptor<T> = FDAdapterBase<T, NoneLossy>;
-
-impl<T> LossyFDAdaptor<T> {
+pub trait LossyFDAdaptor: FDAdapter {
     fn should_drop(&self, uplink: bool) -> bool {
-        unimplemented!()
+        let cfg = self.cfg();
+        let loss = if uplink {
+            cfg.loss_rate_up
+        } else {
+            cfg.loss_rate_dn
+        };
+        loss != 0 && random::<u16>() < loss
     }
+
+    // fn read(&mut self) -> Option<TCPSegment> {
+    //     let ret = FileDescriptor::read(self, None).ok()?;
+    //     if self.should_drop(false) {
+    //         return None;
+    //     }
+    //     Some(ret)
+    // }
+
+    // fn write(&mut self, data: &[u8]) -> Option<()> {
+    //     if self.should_drop(true) {
+    //         return None;
+    //     }
+    //     Some(FileDescriptor::write(self, data).ok()?)
+    // }
 }
-
-//     //! \brief Determine whether or not to drop a given read or write
-//     //! \param[in] uplink is `true` to use the uplink loss probability, else use the downlink loss probability
-//     //! \returns `true` if the segment should be dropped
-//     bool _should_drop(bool uplink) {
-//         const auto &cfg = _adapter.config();
-//         const uint16_t loss = uplink ? cfg.loss_rate_up : cfg.loss_rate_dn;
-//         return loss != 0 && uint16_t(_rand()) < loss;
-//     }
-
-//   public:
-//     //! Conversion to a FileDescriptor by returning the underlying AdapterT
-//     operator const FileDescriptor &() const { return _adapter; }
-
-//     //! Construct from a FileDescriptor appropriate to the AdapterT constructor
-//     explicit LossyFdAdapter(AdapterT &&adapter) : _adapter(std::move(adapter)) {}
-
-//     //! \brief Read from the underlying AdapterT instance, potentially dropping the read datagram
-//     //! \returns std::optional<TCPSegment> that is empty if the segment was dropped or if
-//     //!          the underlying AdapterT returned an empty value
-//     std::optional<TCPSegment> read() {
-//         auto ret = _adapter.read();
-//         if (_should_drop(false)) {
-//             return {};
-//         }
-//         return ret;
-//     }
-
 //     //! \brief Write to the underlying AdapterT instance, potentially dropping the datagram to be written
 //     //! \param[in] seg is the packet to either write or drop
 //     void write(TCPSegment &seg) {

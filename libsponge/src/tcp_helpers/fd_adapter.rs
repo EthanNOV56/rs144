@@ -1,4 +1,4 @@
-use crate::{FDAdapterConfig, FileDescriptor, Milliseconds};
+use crate::{FDAdapterConfig, Milliseconds};
 
 #[derive(Default)]
 pub struct FDAdapterBase {
@@ -6,7 +6,7 @@ pub struct FDAdapterBase {
     listen: bool,
 }
 
-pub trait FDAdapter: FileDescriptor {
+pub trait FDAdapter {
     fn base(&self) -> &FDAdapterBase;
     fn base_mut(&mut self) -> &mut FDAdapterBase;
 
