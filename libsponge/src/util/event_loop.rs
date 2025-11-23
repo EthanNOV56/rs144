@@ -1,4 +1,4 @@
-use crate::{Milliseconds, NakedFileDescriptor, TaggedError, system_call};
+use crate::{FileDescriptor, Milliseconds, TaggedError, system_call};
 
 use libc::{POLLERR, POLLHUP, POLLIN, POLLNVAL, POLLOUT, nfds_t, poll, pollfd};
 use thiserror::Error;
@@ -45,19 +45,15 @@ pub trait EventHandler: Send {
     fn serv_cnt(&self) -> usize;
 }
 
-pub struct EventRule {
-    fd: NakedFileDescriptor,
+pub struct EventRule<F: FileDescriptor> {
+    fd: F,
     direction: Direction,
     handler: Box<dyn EventHandler>,
     serv_cnt: usize,
 }
 
-impl EventRule {
-    pub fn new(
-        fd: NakedFileDescriptor,
-        direction: Direction,
-        handler: Box<dyn EventHandler>,
-    ) -> Self {
+impl<F: FileDescriptor> EventRule<F> {
+    pub fn new(fd: F, direction: Direction, handler: Box<dyn EventHandler>) -> Self {
         EventRule {
             fd,
             direction,
@@ -90,13 +86,13 @@ impl EventRule {
     }
 }
 
-pub struct EventLoop {
-    rules: VecDeque<EventRule>,
+pub struct EventLoop<F: FileDescriptor> {
+    rules: VecDeque<EventRule<F>>,
     to_remove: Vec<usize>,
     should_exit: bool,
 }
 
-impl EventLoop {
+impl<F: FileDescriptor> EventLoop<F> {
     pub fn new() -> Self {
         Self {
             rules: VecDeque::new(),
@@ -105,7 +101,7 @@ impl EventLoop {
         }
     }
 
-    pub fn add_rule(&mut self, rule: EventRule) {
+    pub fn add_rule(&mut self, rule: EventRule<F>) {
         self.rules.push_back(rule);
     }
 
