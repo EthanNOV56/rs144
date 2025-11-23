@@ -5,24 +5,24 @@ use crate::{InternetChecksum, NetParser, NetUnparser, ParseError};
 #[derive(Clone, Copy)]
 pub struct IPv4Header {
     ver: u8,
-    hlen: u8,
+    pub hlen: u8,
     tos: u8,
-    len: u16,
+    pub len: u16,
     id: u16,
     df: bool,
     mf: bool,
     offset: u16,
     ttl: u8,
-    proto: u8,
+    pub proto: u8,
     pub cksum: u16,
-    src: u32,
-    dst: u32,
+    pub src: u32,
+    pub dst: u32,
 }
 
 impl IPv4Header {
     const LENGTH: usize = 20;
     const DEFAULT_TTL: u8 = 128;
-    const PROTO_TCP: u8 = 6;
+    pub const PROTO_TCP: u8 = 6;
 }
 
 impl Default for IPv4Header {

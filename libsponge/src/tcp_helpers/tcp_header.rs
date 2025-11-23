@@ -7,11 +7,11 @@ use crate::{
 
 #[derive(Clone)]
 pub struct TCPHeader {
-    src_port: u16,
-    dst_port: u16,
+    pub src_port: u16,
+    pub dst_port: u16,
     pub seq_no: WrappingU32,
     pub ack_no: WrappingU32,
-    data_offset: u8,
+    pub doff: u8,
     urg: bool,
     pub ack: bool,
     psh: bool,
@@ -30,7 +30,7 @@ impl Default for TCPHeader {
             dst_port: 0,
             seq_no: WrappingU32::default(),
             ack_no: WrappingU32::default(),
-            data_offset: Self::LENGTH as u8 / 4,
+            doff: Self::LENGTH as u8 / 4,
             urg: false,
             ack: false,
             psh: false,
@@ -52,7 +52,7 @@ impl TCPHeader {
         self.dst_port = p.parse_u16(); // destination port
         self.seq_no = WrappingU32::new(p.parse_u32()); // sequence number
         self.ack_no = WrappingU32::new(p.parse_u32()); // ack number
-        self.data_offset = p.parse_u8() >> 4; // data offset
+        self.doff = p.parse_u8() >> 4; // data offset
         let flags = p.parse_u8(); // byte including flags
         self.urg = flags & 0b0010_0000 != 0;
         self.ack = flags & 0b0001_0000 != 0;
@@ -65,11 +65,11 @@ impl TCPHeader {
         self.check_sum = p.parse_u16(); // checksum
         self.urg_ptr = p.parse_u16(); // urgent pointer
 
-        if self.data_offset < 5 {
+        if self.doff < 5 {
             return Err(ParseError::HeaderTooShort);
         }
 
-        p.remove_prefix(self.data_offset as usize * 4 - TCPHeader::LENGTH);
+        p.remove_prefix(self.doff as usize * 4 - TCPHeader::LENGTH);
 
         if p.is_err() {
             return p.get_result();
@@ -78,17 +78,17 @@ impl TCPHeader {
     }
 
     pub fn serialize(&self) -> Result<Vec<u8>, ParseError> {
-        if self.data_offset < 5 {
+        if self.doff < 5 {
             return Err(ParseError::HeaderTooShort);
         }
 
-        let mut buf = Vec::with_capacity(4 * self.data_offset as usize);
+        let mut buf = Vec::with_capacity(4 * self.doff as usize);
 
         NetUnparser::u16(&mut buf, self.src_port); // source port
         NetUnparser::u16(&mut buf, self.dst_port); // destination port
         NetUnparser::u32(&mut buf, self.seq_no.raw_val()); // sequence number
         NetUnparser::u32(&mut buf, self.ack_no.raw_val()); // ack number
-        NetUnparser::u8(&mut buf, self.data_offset << 4); // data offset
+        NetUnparser::u8(&mut buf, self.doff << 4); // data offset
 
         let flags: u8 = (self.urg as u8) << 5
             | (self.ack as u8) << 4
@@ -109,7 +109,7 @@ impl PartialEq for TCPHeader {
     fn eq(&self, other: &TCPHeader) -> bool {
         self.src_port == other.src_port
             && self.dst_port == other.dst_port
-            && self.data_offset == other.data_offset
+            && self.doff == other.doff
             && self.urg == other.urg
             && self.ack == other.ack
             && self.psh == other.psh
@@ -139,7 +139,7 @@ impl Display for TCPHeader {
             self.dst_port,
             self.seq_no.raw_val(),
             self.ack_no.raw_val(),
-            self.data_offset,
+            self.doff,
             self.urg,
             self.ack,
             self.psh,

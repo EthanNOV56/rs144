@@ -24,20 +24,20 @@ impl ByteStream {
     }
 
     pub fn write(&mut self, data: &[u8]) -> usize {
-        let len = data.len().min(self.capacity - self.buffer.size());
+        let len = data.len().min(self.capacity - self.buffer.len());
         self.bytes_written += len;
         self.buffer.append(BufferList::from(data[..len].to_vec()));
         len
     }
 
     pub fn peek_out(&self, len: usize) -> Vec<u8> {
-        let length = len.min(self.buffer.size());
+        let length = len.min(self.buffer.len());
         let vec: Vec<u8> = (&self.buffer).into(); // overhead
         vec[..length].to_vec()
     }
 
     pub fn pop_output(&mut self, len: usize) -> Vec<u8> {
-        let length = len.min(self.buffer.size());
+        let length = len.min(self.buffer.len());
         self.bytes_read += length;
         self.buffer.remove_prefix(length)
     }
@@ -54,12 +54,12 @@ impl ByteStream {
 
     #[inline(always)]
     pub fn buffer_size(&self) -> usize {
-        self.buffer.size()
+        self.buffer.len()
     }
 
     #[inline(always)]
     pub fn buffer_empty(&self) -> bool {
-        self.buffer.size() == 0
+        self.buffer.len() == 0
     }
 
     #[inline(always)]
@@ -79,7 +79,7 @@ impl ByteStream {
 
     #[inline(always)]
     pub fn remaining_capacity(&self) -> usize {
-        self.capacity - self.buffer.size()
+        self.capacity - self.buffer.len()
     }
 
     #[inline(always)]

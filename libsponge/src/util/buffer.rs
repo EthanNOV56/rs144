@@ -179,7 +179,7 @@ impl TryInto<Buffer> for &BufferList {
 
 impl Into<Vec<u8>> for &BufferList {
     fn into(self) -> Vec<u8> {
-        let size = self.size();
+        let size = self.len();
         self.iter().map(|buf| buf.as_ref().to_vec()).fold(
             Vec::with_capacity(size),
             |mut acc, buf| {
@@ -192,7 +192,7 @@ impl Into<Vec<u8>> for &BufferList {
 
 impl BufferList {
     #[inline(always)]
-    pub fn size(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.iter().map(|buf| buf.len()).sum()
     }
 

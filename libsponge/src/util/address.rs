@@ -213,9 +213,10 @@ impl TryInto<String> for Address {
     }
 }
 
-pub struct IPv4NUM(u32);
+#[derive(PartialEq, Eq)]
+pub struct IPv4NUM(pub u32);
 
-impl TryInto<IPv4NUM> for Address {
+impl TryInto<IPv4NUM> for &Address {
     type Error = Error;
 
     fn try_into(self) -> Result<IPv4NUM> {

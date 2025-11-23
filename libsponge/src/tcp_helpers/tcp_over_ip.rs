@@ -1,4 +1,4 @@
-use crate::{FDAdaptor, InternetDatagram, TCPSegment};
+use crate::{Address, FDAdaptor, IPv4Header, IPv4NUM, InternetDatagram, TCPSegment};
 
 pub trait ToI {}
 
@@ -7,73 +7,81 @@ impl ToI for TCPOverIPv4 {}
 
 pub type TCPOverIPv4Adapter = FDAdaptor<TCPOverIPv4>;
 
-impl TCPOverIPv4Adapter {
-    pub fn unwrap_tcp_in_ip(&self, ip_dgram: &InternetDatagram) -> Option<TCPSegment> {}
-    pub fn wrap_tcp_in_ip(&self, tcp_seg: &TCPSegment) -> InternetDatagram {}
+fn inet_ntoa(addr: u32) -> String {
+    let octets = addr.to_be_bytes();
+    format!("{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
 }
 
-// optional<TCPSegment> TCPOverIPv4Adapter::unwrap_tcp_in_ip(const InternetDatagram &ip_dgram) {
-//     // is the IPv4 datagram for us?
-//     // Note: it's valid to bind to address "0" (INADDR_ANY) and reply from actual address contacted
-//     if (not listening() and (ip_dgram.header().dst != config().source.ipv4_numeric())) {
-//         return {};
-//     }
+impl TCPOverIPv4Adapter {
+    pub fn unwrap_tcp_in_ip(&mut self, ip_dgram: &InternetDatagram) -> Option<TCPSegment> {
+        let dgram_src = IPv4NUM(ip_dgram.header().src);
+        let dgram_dst = IPv4NUM(ip_dgram.header().dst);
+        let cfg_src: IPv4NUM = (&self.cfg().source).try_into().ok()?;
+        let cfg_dst: IPv4NUM = (&self.cfg().destination).try_into().ok()?;
+        if !self.listen() && (dgram_dst != cfg_src || dgram_src != cfg_dst) {
+            return None;
+        }
+        if ip_dgram.header().proto != IPv4Header::PROTO_TCP {
+            return None;
+        }
 
-//     // is the IPv4 datagram from our peer?
-//     if (not listening() and (ip_dgram.header().src != config().destination.ipv4_numeric())) {
-//         return {};
-//     }
+        let mut tcp_seg = TCPSegment::default();
+        tcp_seg
+            .parse(
+                ip_dgram.payload().try_into().ok()?,
+                ip_dgram.header().pseudo_cksum(),
+            )
+            .ok()?;
 
-//     // does the IPv4 datagram claim that its payload is a TCP segment?
-//     if (ip_dgram.header().proto != IPv4Header::PROTO_TCP) {
-//         return {};
-//     }
+        if IPv4NUM(tcp_seg.header().dst_port as u32) != cfg_src
+            || IPv4NUM(tcp_seg.header().src_port as u32) != cfg_dst
+        {
+            return None;
+        }
 
-//     // is the payload a valid TCP segment?
-//     TCPSegment tcp_seg;
-//     if (ParseResult::NoError != tcp_seg.parse(ip_dgram.payload(), ip_dgram.header().pseudo_cksum())) {
-//         return {};
-//     }
+        if self.listen() {
+            if tcp_seg.header().syn && !tcp_seg.header().rst {
+                let cfg = self.cfg_mut();
+                cfg.source = Address::try_from_string(
+                    &inet_ntoa(dgram_dst.0),
+                    cfg.source.ip().ok()?.as_str(),
+                )
+                .ok()?;
+                cfg.destination = Address::try_from_string(
+                    &inet_ntoa(dgram_src.0),
+                    tcp_seg.header().src_port.to_string().as_str(),
+                )
+                .ok()?;
+                self.set_listening(false);
+            } else {
+                return None;
+            }
+        }
 
-//     // is the TCP segment for us?
-//     if (tcp_seg.header().dport != config().source.port()) {
-//         return {};
-//     }
+        if tcp_seg.header().src_port != self.cfg_mut().destination.port().ok()? {
+            return None;
+        }
 
-//     // should we target this source addr/port (and use its destination addr as our source) in reply?
-//     if (listening()) {
-//         if (tcp_seg.header().syn and not tcp_seg.header().rst) {
-//             config_mutable().source = {inet_ntoa({htobe32(ip_dgram.header().dst)}), config().source.port()};
-//             config_mutable().destination = {inet_ntoa({htobe32(ip_dgram.header().src)}), tcp_seg.header().sport};
-//             set_listening(false);
-//         } else {
-//             return {};
-//         }
-//     }
+        Some(tcp_seg)
+    }
 
-//     // is the TCP segment from our peer?
-//     if (tcp_seg.header().sport != config().destination.port()) {
-//         return {};
-//     }
+    pub fn wrap_tcp_in_ip(&mut self, tcp_seg: &mut TCPSegment) -> Option<InternetDatagram> {
+        let mut ip_dgram = InternetDatagram::default();
 
-//     return tcp_seg;
-// }
+        let src_addr = &mut self.cfg_mut().source;
+        tcp_seg.header_mut().src_port = src_addr.port().ok()?;
+        ip_dgram.header_mut().src = TryInto::<IPv4NUM>::try_into(src_addr as &Address).ok()?.0;
 
-// //! Takes a TCP segment, sets port numbers as necessary, and wraps it in an IPv4 datagram
-// //! \param[in] seg is the TCP segment to convert
-// InternetDatagram TCPOverIPv4Adapter::wrap_tcp_in_ip(TCPSegment &seg) {
-//     // set the port numbers in the TCP segment
-//     seg.header().sport = config().source.port();
-//     seg.header().dport = config().destination.port();
+        let dst_addr = &mut self.cfg_mut().destination;
+        tcp_seg.header_mut().dst_port = dst_addr.port().ok()?;
+        ip_dgram.header_mut().dst = TryInto::<IPv4NUM>::try_into(dst_addr as &Address).ok()?.0;
 
-//     // create an Internet Datagram and set its addresses and length
-//     InternetDatagram ip_dgram;
-//     ip_dgram.header().src = config().source.ipv4_numeric();
-//     ip_dgram.header().dst = config().destination.ipv4_numeric();
-//     ip_dgram.header().len = ip_dgram.header().hlen * 4 + seg.header().doff * 4 + seg.payload().size();
+        ip_dgram.header_mut().len = (ip_dgram.header().hlen as u16) * 4
+            + (tcp_seg.header().doff as u16) * 4
+            + tcp_seg.payload().len() as u16;
 
-//     // set payload, calculating TCP checksum using information from IP header
-//     ip_dgram.payload() = seg.serialize(ip_dgram.header().pseudo_cksum());
+        *ip_dgram.payload_mut() = tcp_seg.serialize(ip_dgram.header().pseudo_cksum()).ok()?;
 
-//     return ip_dgram;
-// }
+        Some(ip_dgram)
+    }
+}

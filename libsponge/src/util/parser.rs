@@ -18,6 +18,8 @@ pub enum ParseError {
     TruncatedPacket,
     #[error("Packet uses unsupported features")]
     Unsupported,
+    #[error("Payload size mismatch")]
+    PayloadSizeMismatch,
 }
 
 impl ParseError {
@@ -148,6 +150,7 @@ impl NetParser {
 pub struct NetUnparser;
 
 impl NetUnparser {
+    #[inline(always)]
     pub fn unparse_int<T: UnsignedInt>(s: &mut Vec<u8>, val: T) {
         let len = std::mem::size_of::<T>();
         for i in 0..len {
@@ -157,14 +160,17 @@ impl NetUnparser {
         }
     }
 
+    #[inline(always)]
     pub fn u32(s: &mut Vec<u8>, val: u32) {
         Self::unparse_int(s, val);
     }
 
+    #[inline(always)]
     pub fn u16(s: &mut Vec<u8>, val: u16) {
         Self::unparse_int(s, val);
     }
 
+    #[inline(always)]
     pub fn u8(s: &mut Vec<u8>, val: u8) {
         Self::unparse_int(s, val);
     }

@@ -24,7 +24,7 @@ impl<T, L> FDAdapterBase<T, L> {
         &self.cfg
     }
 
-    fn cfg_mut(&mut self) -> &mut FDAdapterConfig {
+    pub fn cfg_mut(&mut self) -> &mut FDAdapterConfig {
         &mut self.cfg
     }
 
