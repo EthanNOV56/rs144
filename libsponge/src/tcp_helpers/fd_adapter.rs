@@ -1,32 +1,35 @@
-use crate::{FDAdapterConfig, Milliseconds};
-
-use std::marker::PhantomData;
+use crate::{FDAdapterConfig, FileDescriptor, Milliseconds};
 
 #[derive(Default)]
-pub struct FDAdapterBase<T, L> {
+pub struct FDAdapterBase {
     cfg: FDAdapterConfig,
     listen: bool,
-
-    _type: PhantomData<T>,
-    _lossy: PhantomData<L>,
 }
 
-impl<T, L> FDAdapterBase<T, L> {
-    pub fn set_listening(&mut self, l: bool) {
-        self.listen = l;
+pub trait FDAdapter: FileDescriptor {
+    fn base(&self) -> &FDAdapterBase;
+    fn base_mut(&mut self) -> &mut FDAdapterBase;
+
+    #[inline(always)]
+    fn set_listening(&mut self, l: bool) {
+        self.base_mut().listen = l;
     }
 
-    pub fn listen(&self) -> bool {
-        self.listen
+    #[inline(always)]
+    fn listen(&self) -> bool {
+        self.base().listen
     }
 
-    pub fn cfg(&self) -> &FDAdapterConfig {
-        &self.cfg
+    #[inline(always)]
+    fn cfg(&self) -> &FDAdapterConfig {
+        &self.base().cfg
     }
 
-    pub fn cfg_mut(&mut self) -> &mut FDAdapterConfig {
-        &mut self.cfg
+    #[inline(always)]
+    fn cfg_mut(&mut self) -> &mut FDAdapterConfig {
+        &mut self.base_mut().cfg
     }
 
+    #[inline(always)]
     fn tick(&mut self, elapsed: Milliseconds) {}
 }

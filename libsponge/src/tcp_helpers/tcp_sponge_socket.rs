@@ -7,8 +7,8 @@ use crate::{
     TCPOverIPv4OverTunFdAdapter,
 };
 
-pub struct TCPSpongeSocket<A: Default + Clone> {
-    thread_data: LSSocket<A>,
+pub struct TCPSpongeSocket<F> {
+    thread_data: LSSocket,
     dgram_adapter: A,
     tcp: Option<TCPConnection>,
     event_loop: EventLoop,
